@@ -1,0 +1,51 @@
+{
+  "title": "tmprrcnw4kl",
+  "file_path": "C:\\Users\\29755\\AppData\\Local\\Temp\\claude\\tmprrcnw4kl.txt",
+  "chapters": [
+    {
+      "index": 1,
+      "title": "星落",
+      "content": "第一章 星落\n\n夜幕降临，长安城华灯初上。苏墨站在朱雀大街的尽头，手握一柄锈迹斑斑的铁剑。\n\n\"三年了，我终于回来了。\"他低声自语。",
+      "word_count": 66,
+      "status": "pending"
+    },
+    {
+      "index": 2,
+      "title": "暗巷",
+      "content": "第二章 暗巷\n\n他绕过朱雀大街，钻进一条暗巷。一只黑猫从墙头跃下，落在他肩上。\n\n苏墨从怀中取出一张泛黄的羊皮纸，上面画着将军府的内部地形图。",
+      "word_count": 71,
+      "status": "pending"
+    },
+    {
+      "index": 3,
+      "title": "相遇",
+      "content": "第三章 相遇\n\n清晨的阳光洒在青石板路上。一位白衣少女从巷口经过，目光与苏墨相遇。\n\n\"你是...\"少女迟疑地看着他手中的剑。",
+      "word_count": 63,
+      "status": "pending"
+    }
+  ],
+  "characters": [],
+  "story_graph": {
+    "_schema_version": 2,
+    "last_updated_chapter": 3,
+    "persons": [],
+    "events": [],
+    "locations": [],
+    "organizations": [],
+    "items": [],
+    "chapters": [],
+    "relationship_edges": [],
+    "appears_in_edges": [],
+    "participates_edges": [],
+    "occurs_in_edges": [],
+    "located_at_edges": [],
+    "belongs_to_edges": [],
+    "owns_edges": [],
+    "event_relation_edges": [],
+    "location_hierarchy_edges": [],
+    "timeline": []
+  },
+  "style_profile": null,
+  "current_chapter_index": 0,
+  "output_dir": "D:\\Codes_lxy\\VibeCoding\\novel2comic\\projects\\20260625_152038"
+}

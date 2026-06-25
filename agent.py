@@ -48,6 +48,17 @@ from novel2comic.src.knowledge_graph import (
     extract_story_graph_from_text, update_story_graph_with_chapter,
 )
 
+# Phase 1: 导入新服务层
+from novel2comic.src.llm import UnifiedLLM
+from novel2comic.src.services import (
+    KnowledgeGraphService,
+    ImageGenerationService,
+    ComicCompilationService,
+    ProjectService,
+    SearchService,
+)
+from novel2comic.src.context import ServiceRegistry
+
 # ============================================================
 # 共享上下文（Tool 通过此访问 LLM / ImageGen / Data）
 # ============================================================
@@ -60,6 +71,8 @@ class AgentContext:
         self.openai_client = None   # openai.OpenAI 同步客户端（供 Tool 内 LLM 调用）
         self.llm_model: str = ""
         self.img_gen: Optional[ImageGenAdapter] = None
+        self._llm = None  # UnifiedLLM 实例（Phase 1 新增，可选）
+        self.services = None  # ServiceRegistry 实例（Phase 1 新增，可选）
 
     @property
     def data(self) -> Optional[ChapterData]:
@@ -91,7 +104,14 @@ def _read_text_file(file_path: str) -> str:
 
 
 def _llm_chat_json(system_prompt: str, user_prompt: str, temperature: float = 0.3) -> dict:
-    """Tool 内部使用的 LLM JSON 调用。"""
+    """Tool 内部使用的 LLM JSON 调用。
+
+    委托给 UnifiedLLM 服务（src/llm.py）。
+    """
+    # 使用全局 _ctx 上的 UnifiedLLM（Phase 1 兼容模式）
+    if hasattr(_ctx, '_llm') and _ctx._llm is not None:
+        return _ctx._llm.chat_json(system_prompt, user_prompt, temperature)
+    # 向后兼容：直接调用原始 OpenAI 客户端
     full_system = system_prompt + "\n\nYou MUST respond with valid JSON only. No markdown fences, no explanation."
     response = _ctx.openai_client.chat.completions.create(
         model=_ctx.llm_model,
@@ -164,7 +184,7 @@ def load_novel(file_path: str) -> str:
 
     # 创建项目目录
     project_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        os.path.dirname(os.path.abspath(__file__)),
         "projects", datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
     os.makedirs(project_dir, exist_ok=True)
@@ -1431,6 +1451,19 @@ def build_agent():
     _ctx.openai_client = openai.OpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
     _ctx.llm_model = model
 
+    # Phase 1: 创建 UnifiedLLM（封装 _llm_chat_json）
+    _ctx._llm = UnifiedLLM(_ctx.openai_client, model)
+
+    # Phase 1: 创建 ServiceRegistry（供 Agent 工具使用）
+    kg_service = KnowledgeGraphService(llm=_ctx._llm)
+    _ctx.services = ServiceRegistry(
+        kg=kg_service,
+        image=ImageGenerationService(),
+        comic=ComicCompilationService(),
+        project=ProjectService(),
+        search=SearchService(),
+    )
+
     # ImageGen Adapter
     img_api_key = os.getenv("N2C_IMG_API_KEY", "")
     img_base_url = os.getenv("N2C_IMG_BASE_URL", "")
@@ -1573,26 +1606,36 @@ async def run_single_chapter(text: str, title: str = "未命名章节"):
 
 
 # ============================================================
-# CLI 入口
+# CLI 入口（已废弃，请使用 main.py）
 # ============================================================
 
 if __name__ == "__main__":
+    import warnings
+    print("=" * 60)
+    print("[!] agent.py 已废弃，请使用新的入口：")
+    print()
+    print("  python main.py comic --novel 小说.txt")
+    print("  python main.py comic --text '小说内容' --title 标题")
+    print()
+    print("更多功能：")
+    print("  python main.py continue --novel 小说.txt")
+    print("  python main.py roleplay --novel 小说.txt --character 角色名")
+    print("  python main.py recommend --novel 小说.txt")
+    print("  python main.py summarize --novel 小说.txt")
+    print()
+    print("将继续以兼容模式运行...")
+    print("=" * 60)
+
     if len(sys.argv) < 2:
-        print("Novel2Comic Agent V2 - Agent 驱动的小说转漫画")
         print()
         print("用法:")
-        print("  全书模式: python agent.py --novel 小说.txt")
-        print("  单章模式: python agent.py chapter1.txt 月下初遇")
-        print('  单章模式: python agent.py "小说内容文本" 第一章')
-        print()
-        print("示例:")
-        print("  python agent.py --novel 斗破苍穹.txt")
-        print("  python agent.py chapter1.txt 月下初遇")
+        print("  全书模式: python main.py comic --novel 小说.txt")
+        print("  单章模式: python main.py comic --text '小说内容' --title 标题")
         sys.exit(1)
 
     if sys.argv[1] == "--novel":
         if len(sys.argv) < 3:
-            print("[!] 请指定小说文件路径: python agent.py --novel 小说.txt")
+            print("[!] 请指定小说文件路径: python main.py comic --novel 小说.txt")
             sys.exit(1)
         novel_path = sys.argv[2]
         asyncio.run(run_novel_agent(novel_path))

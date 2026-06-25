@@ -21,5 +21,12 @@ dev = [
     "pytest>=8.0",
 ]
 
+[tool.setuptools]
+packages = ["novel2comic", "novel2comic.src"]
+
+[tool.setuptools.package-dir]
+"novel2comic" = "."
+"novel2comic.src" = "src"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
