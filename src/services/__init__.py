@@ -10,6 +10,7 @@ from novel2comic.src.services.image_service import ImageGenerationService
 from novel2comic.src.services.comic_service import ComicCompilationService
 from novel2comic.src.services.project_service import ProjectService
 from novel2comic.src.services.search_service import SearchService
+from novel2comic.src.services.graph_viz import KnowledgeGraphVisualizer
 
 __all__ = [
     "KnowledgeGraphService",
@@ -17,4 +18,5 @@ __all__ = [
     "ComicCompilationService",
     "ProjectService",
     "SearchService",
+    "KnowledgeGraphVisualizer",
 ]

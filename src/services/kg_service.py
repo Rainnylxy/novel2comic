@@ -43,41 +43,67 @@ class KnowledgeGraphService:
         total_chapters: int = 1,
         chapter_indices: list = None,
     ) -> "StoryGraph":
-        """对全书进行首次知识图谱提取。
+        """[deprecated] 全量采样提取。请使用 extract_incremental。"""
+        return self._do_extract(text[:12000])
 
-        复用 agent.py 中的采样策略：每章最多 10 段各 1500 字。
+    def extract_incremental(
+        self,
+        chapters: list,
+        base_chapters: int = 3,
+        max_chars_per_chapter: int = 8000,
+    ) -> "StoryGraph":
+        """逐章增量构建知识图谱。
+
+        - 前 base_chapters 章各自做全量提取，合并为基础 KG
+        - 后续章节做增量更新，每章只提取变化
+        - 每个章节获得专属 LLM 调用，避免信息压缩丢失
+
+        Args:
+            chapters: ChapterInfo 列表
+            base_chapters: 前几章做全量提取（默认 3）
+            max_chars_per_chapter: 每章最大字符数
+
+        Returns:
+            完整的 StoryGraph
         """
-        # 采样策略：每章取前 10 段，每段最多 1500 字符
-        samples = []
-        lines = text.split("\n")
-        paragraph_count = 0
-        current_sample = ""
-        for line in lines:
-            line = line.strip()
-            if not line:
-                if current_sample:
-                    samples.append(current_sample[:1500])
-                    current_sample = ""
-                    paragraph_count += 1
-                    if paragraph_count >= 10 * total_chapters:
-                        break
+        graph = StoryGraph()
+        total = len(chapters)
+        if total == 0:
+            return graph
+
+        client = self._llm._client if self._llm else None
+        model = self._llm.model if self._llm else "deepseek-chat"
+
+        for i, ch in enumerate(chapters):
+            ch_text = (ch.content or "")[:max_chars_per_chapter]
+            if not ch_text.strip():
+                continue
+
+            progress = f"[KG] ({i+1}/{total}) 第{ch.index}章"
+            if i < base_chapters:
+                print(f"{progress} 全量提取...", end=" ", flush=True)
+                try:
+                    partial = extract_story_graph_from_text(
+                        ch_text, openai_client=client, model=model,
+                    )
+                    graph = self._merge_graphs(graph, partial)
+                    print(f"✓ ({partial.total_node_count} 节点)")
+                except Exception as e:
+                    print(f"✗ ({e})")
             else:
-                if current_sample:
-                    current_sample += "\n" + line
-                else:
-                    current_sample = line
-        if current_sample and paragraph_count < 10 * total_chapters:
-            samples.append(current_sample[:1500])
+                print(f"{progress} 增量更新...", end=" ", flush=True)
+                try:
+                    before = graph.total_node_count
+                    graph = update_story_graph_with_chapter(
+                        graph, ch_text, ch.index,
+                        openai_client=client, model=model,
+                    )
+                    added = graph.total_node_count - before
+                    print(f"✓ (+{added} 节点)")
+                except Exception as e:
+                    print(f"✗ ({e})")
 
-        sample_text = "\n\n---\n\n".join(samples)
-
-        # extract_story_graph_from_text 的真实签名：
-        # (text, openai_client, model="deepseek-chat", temperature=0.3)
-        return extract_story_graph_from_text(
-            sample_text,
-            openai_client=self._llm._client if self._llm else None,
-            model=self._llm.model if self._llm else "deepseek-chat",
-        )
+        return graph
 
     def update_with_chapter(
         self,
@@ -91,6 +117,49 @@ class KnowledgeGraphService:
             openai_client=self._llm._client if self._llm else None,
             model=self._llm.model if self._llm else "deepseek-chat",
         )
+
+    # ── 内部 ──
+
+    def _do_extract(self, text: str) -> "StoryGraph":
+        """单次全量提取。"""
+        return extract_story_graph_from_text(
+            text,
+            openai_client=self._llm._client if self._llm else None,
+            model=self._llm.model if self._llm else "deepseek-chat",
+        )
+
+    @staticmethod
+    def _merge_graphs(base: "StoryGraph", addition: "StoryGraph") -> "StoryGraph":
+        """合并两个 StoryGraph（将 addition 的节点和边加入 base）。"""
+        for pn in addition.person_nodes:
+            if not base.get_person_node(pn.name):
+                base.add_person_node(pn)
+        for en in addition.event_nodes:
+            if not base.get_event_node(en.name):
+                base.add_event_node(en)
+        for ln in addition.location_nodes:
+            if not base.get_location_node(ln.name):
+                base.add_location_node(ln)
+        for on in addition.org_nodes:
+            if not base.get_org_node(on.name):
+                base.add_org_node(on)
+        for it in addition.item_nodes:
+            if not base.get_item_node(it.name):
+                base.add_item_node(it)
+        for re in addition.relationship_edges:
+            existing = base.get_relationship_edge(re.from_char, re.to_char)
+            if not existing:
+                base.add_relationship_edge(re)
+        for pe in addition.participates_edges:
+            base.add_participates_edge(pe)
+        for le in addition.located_at_edges:
+            base.add_located_at_edge(le)
+        for er in addition.event_relation_edges:
+            base.add_event_relation_edge(er)
+        base.last_updated_chapter = max(
+            base.last_updated_chapter, addition.last_updated_chapter,
+        )
+        return base
 
     # ================================================================
     # 上下文生成

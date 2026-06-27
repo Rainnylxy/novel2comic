@@ -38,6 +38,7 @@ from novel2comic.src.services.project_service import ProjectService as PS
 
 def _build_context_and_services(
     api_key: str, base_url: str, model: str, proxy: str,
+    tool_model: str = "",
 ) -> tuple:
     """构建 GlobalContext 和 ServiceRegistry。"""
     import openai
@@ -55,7 +56,7 @@ def _build_context_and_services(
         http_client=http_client,
     )
 
-    llm = UnifiedLLM(sync_openai, model)
+    llm = UnifiedLLM(sync_openai, tool_model or model)
 
     ctx = GlobalContext(
         llm_model=model,
@@ -106,14 +107,12 @@ def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext):
         output_dir=project_dir,
     )
 
-    print(f"[KG] 正在提取知识图谱（{len(chapters)} 章）...")
-    chapter_indices = [ch.index for ch in chapters]
-    ctx.novel.story_graph = services.kg.extract_initial(
-        text, len(chapters), chapter_indices,
-    )
+    print(f"[KG] 正在逐章提取知识图谱（{len(chapters)} 章）...")
+    ctx.novel.story_graph = services.kg.extract_incremental(chapters)
     services.project.save_novel(ctx.novel)
     print(f"[KG] 完成：{ctx.novel.story_graph.total_node_count} 个节点，"
           f"{ctx.novel.story_graph.total_edge_count} 条边")
+
     return base_name, chapters, text
 
 
@@ -382,9 +381,10 @@ async def run_interactive(args):
     api_key = _require_api_key()
     base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
+    tool_model = os.getenv("AGENTFLOW_TOOL_MODEL", model)  # 蒸馏/反思用
     proxy = os.getenv("AGENTFLOW_PROXY", "")
 
-    ctx, services, llm = _build_context_and_services(api_key, base_url, model, proxy)
+    ctx, services, llm = _build_context_and_services(api_key, base_url, model, proxy, tool_model)
 
     # 确定初始意图
     if args.command == "interactive":
@@ -494,6 +494,79 @@ def _build_first_task(args, intent: str, ctx: GlobalContext) -> Optional[str]:
 
 
 # ============================================================
+# Viz 命令 —— 知识图谱可视化
+# ============================================================
+
+async def run_viz(args):
+    """生成知识图谱交互式 HTML 可视化文件。
+
+    优先从缓存（novel_registry）加载已有 KG，无需 API key。
+    如果缓存不存在，需要 AGENTFLOW_API_KEY 来提取 KG。
+    """
+    from novel2comic.src.services.graph_viz import KnowledgeGraphVisualizer
+    from novel2comic.src.chapter_parser import parse_novel_chapters
+    from novel2comic.src.models import Novel
+    from novel2comic.src.novel_registry import find_novel
+
+    # 先尝试从缓存加载
+    cache_entry = find_novel(args.novel)
+    if cache_entry and os.path.exists(cache_entry.project_dir):
+        novel_json = os.path.join(cache_entry.project_dir, "novel.json")
+        if os.path.exists(novel_json):
+            print(f"[Cache] 从缓存加载: {novel_json}")
+            novel = Novel.load(novel_json)
+            if novel.story_graph and hasattr(novel.story_graph, 'total_node_count'):
+                n = novel.story_graph.total_node_count
+                e = novel.story_graph.total_edge_count if hasattr(novel.story_graph, 'total_edge_count') else 0
+                print(f"[Cache] KG: {n} 节点, {e} 边")
+
+                output_path = args.output or os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "outputs", "kg_viz.html",
+                )
+                viz = KnowledgeGraphVisualizer()
+                viz.render(novel.story_graph, output_path)
+                print(f"\n请用浏览器打开: file:///{output_path.replace(os.sep, '/')}")
+                return
+
+        print("[Cache] 缓存数据无有效 KG，需要重新提取")
+
+    # 无缓存，需要 API key 提取 KG
+    api_key = _require_api_key()
+    base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
+    model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
+    tool_model = os.getenv("AGENTFLOW_TOOL_MODEL", model)
+    proxy = os.getenv("AGENTFLOW_PROXY", "")
+
+    ctx, services, llm = _build_context_and_services(api_key, base_url, model, proxy, tool_model)
+
+    print(f"[Loading] 正在加载 {args.novel}...")
+    text = PS.read_text_file(args.novel)
+    base_name = os.path.splitext(os.path.basename(args.novel))[0]
+    chapters = parse_novel_chapters(text, base_name)
+
+    project_dir = services.project.create_project_dir(base_name)
+    ctx.novel = Novel(
+        title=base_name, file_path=os.path.abspath(args.novel),
+        chapters=chapters, output_dir=project_dir,
+    )
+
+    print(f"[KG] 正在提取知识图谱（{len(chapters)} 章）...")
+    ctx.novel.story_graph = services.kg.extract_incremental(chapters)
+    services.project.save_novel(ctx.novel)
+    print(f"[KG] 完成：{ctx.novel.story_graph.total_node_count} 个节点, "
+          f"{ctx.novel.story_graph.total_edge_count} 条边")
+
+    output_path = args.output or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "outputs", "kg_viz.html",
+    )
+    viz = KnowledgeGraphVisualizer()
+    viz.render(ctx.novel.story_graph, output_path)
+    print(f"\n请用浏览器打开: file:///{output_path.replace(os.sep, '/')}")
+
+
+# ============================================================
 # 主入口
 # ============================================================
 
@@ -546,6 +619,11 @@ async def main():
     summarize_parser.add_argument("--theme", action="store_true", help="全书主题分析")
     summarize_parser.add_argument("--perspective", type=str, help="摘要视角")
 
+    # viz 子命令
+    viz_parser = subparsers.add_parser("viz", help="知识图谱可视化")
+    viz_parser.add_argument("--novel", type=str, required=True, help="小说文件路径")
+    viz_parser.add_argument("--output", type=str, default="", help="输出 HTML 路径（默认 outputs/kg_viz.html）")
+
     # 兼容旧用法
     parser.add_argument("text_or_file", nargs="?", help="小说文本或文件路径")
     parser.add_argument("title", nargs="?", help="章节标题")
@@ -554,10 +632,11 @@ async def main():
 
     # 路由：子命令 > 交互模式 > 自动路由 > 帮助
     if args.command in ("comic", "continue", "roleplay", "recommend", "summarize"):
-        # 显式子命令 → 交互模式
         await run_interactive(args)
     elif args.command in ("interactive", "i"):
         await run_interactive(args)
+    elif args.command == "viz":
+        await run_viz(args)
     elif args.text_or_file:
         # 自动路由
         from novel2comic.src.router.router import IntentRouter, Intent

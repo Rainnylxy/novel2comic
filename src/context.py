@@ -31,6 +31,10 @@ class GlobalContext:
 
     services: Optional["ServiceRegistry"] = None
 
+    # 角色蒸馏 Profile（由 CharacterDistiller 蒸馏后挂载）
+    # {character_name: CharacterProfile}
+    character_profiles: dict = field(default_factory=dict)
+
 
 @dataclass
 class ServiceRegistry:
