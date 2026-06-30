@@ -18,7 +18,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
-from novel2comic.src.evaluation.golden_dataset import GoldenCase, GoldenDataset
+from .golden_dataset import GoldenCase, GoldenDataset
 
 
 # ================================================================
@@ -90,7 +90,7 @@ class NovelDialogueParser:
         Returns:
             [{"index": 1, "title": "第1章", "lines": [...], "start_line": 0, "end_line": 42}]
         """
-        from novel2comic.src.chapter_parser import parse_novel_chapters
+        from ..chapter_parser import parse_novel_chapters
 
         chapters = parse_novel_chapters(self._text, self._title)
         result = []
@@ -916,7 +916,7 @@ class ScenarioSynthesizer:
         """构建 KG 上下文文本。"""
         if not graph:
             return "无"
-        from novel2comic.src.knowledge_graph import graph_to_context
+        from ..knowledge_graph import graph_to_context
         return graph_to_context(graph, max_chars_per_section=500)
 
     def _get_character_relationships(self, name: str, graph) -> list[dict]:

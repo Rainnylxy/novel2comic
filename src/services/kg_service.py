@@ -8,20 +8,20 @@
 
 from typing import Optional, TYPE_CHECKING
 
-from novel2comic.src.knowledge_graph import (
+from ..knowledge_graph import (
     extract_story_graph_from_text,
     update_story_graph_with_chapter,
     graph_to_context,
 )
-from novel2comic.src.models import StoryGraph
+from ..models import StoryGraph
 
 if TYPE_CHECKING:
-    from novel2comic.src.models import (
+    from ..models import (
         Novel, CharacterNode, EventNode,
         LocationNode, OrganizationNode, ItemNode,
         RelationshipEdge, ChapterInfo,
     )
-    from novel2comic.src.llm import UnifiedLLM
+    from ..llm import UnifiedLLM
 
 
 class KnowledgeGraphService:

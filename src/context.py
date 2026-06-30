@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from novel2comic.src.models import Novel, ChapterData
+    from .models import Novel, ChapterData
     from agentflow.runtime.llm_client import OpenAIClient
 
 

@@ -12,13 +12,13 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from novel2comic.src.context import GlobalContext, ServiceRegistry
-from novel2comic.src.llm import UnifiedLLM
-from novel2comic.src.services import (
+from ..context import GlobalContext, ServiceRegistry
+from ..llm import UnifiedLLM
+from ..services import (
     KnowledgeGraphService,
     ProjectService,
 )
-from novel2comic.src.services.project_service import ProjectService as PS
+from ..services.project_service import ProjectService as PS
 
 
 # ============================================================
@@ -69,8 +69,8 @@ def _build_context_and_services(
 
 def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext):
     """加载小说 + 逐章提取 KG。"""
-    from novel2comic.src.chapter_parser import parse_novel_chapters
-    from novel2comic.src.models import Novel
+    from ..chapter_parser import parse_novel_chapters
+    from ..models import Novel
 
     print(f"[Loading] 正在加载 {novel_path}...")
     text = PS.read_text_file(novel_path)
@@ -105,7 +105,7 @@ def _auto_viz(ctx: GlobalContext, base_name: str):
     graph = ctx.novel.story_graph if ctx.novel else None
     if not graph or graph.total_node_count == 0:
         return
-    from novel2comic.src.services.graph_viz import KnowledgeGraphVisualizer
+    from ..services.graph_viz import KnowledgeGraphVisualizer
     viz = KnowledgeGraphVisualizer()
     output_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -191,7 +191,7 @@ async def run_roleplay(args):
     if getattr(args, "novel", None):
         _load_novel(args.novel, services, ctx)
 
-    from novel2comic.src.agents.roleplay_agent import RolePlayAgent
+    from ..agents.roleplay_agent import RolePlayAgent
     agent = RolePlayAgent(ctx, services, llm)
     agent.init_character(character)
 

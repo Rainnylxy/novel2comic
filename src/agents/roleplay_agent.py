@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 
 from agentflow.runtime.toolkit import tool
 
-from novel2comic.src.agents.base_agent import BaseAgent
+from .base_agent import BaseAgent
 if TYPE_CHECKING:
-    from novel2comic.src.context import GlobalContext, ServiceRegistry
-    from novel2comic.src.llm import UnifiedLLM
+    from ..context import GlobalContext, ServiceRegistry
+    from ..llm import UnifiedLLM
 
 
 def _read_novel_text(file_path: str) -> str:
@@ -414,7 +414,7 @@ def _ensure_char_profile(ctx: "GlobalContext", name: str, graph, llm: "UnifiedLL
         novel_text = _read_novel_text(ctx.novel.file_path)
         if novel_text:
             try:
-                from novel2comic.src.character_distiller import CharacterDistiller
+                from ..character_distiller import CharacterDistiller
                 distiller = CharacterDistiller(llm, ctx.services.kg)
                 profile = distiller.distill_character(name, novel_text, graph)
                 ctx.character_profiles[name] = profile

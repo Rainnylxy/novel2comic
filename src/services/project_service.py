@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from novel2comic.src.models import Novel
+    from ..models import Novel
 
 
 class ProjectService:

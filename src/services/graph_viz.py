@@ -2,7 +2,7 @@
 """知识图谱可视化服务 —— 生成交互式 HTML 文件。
 
 用法:
-    from novel2comic.src.services.graph_viz import KnowledgeGraphVisualizer
+    from .graph_viz import KnowledgeGraphVisualizer
     viz = KnowledgeGraphVisualizer()
     viz.render(graph, "output/kg_view.html")
     # 然后用浏览器打开 kg_view.html
@@ -13,7 +13,7 @@ import os
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from novel2comic.src.models import StoryGraph
+    from ..models import StoryGraph
 
 # ============================================================
 # 节点 / 边的视觉配置

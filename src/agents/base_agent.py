@@ -11,11 +11,11 @@ from agentflow.runtime.builder import AgentBuilder
 from agentflow.runtime.memory.manager import MemoryProfile, WorkingConfig
 from agentflow.runtime.thinking import ThinkingMode
 
-from novel2comic.src.agent_memory import AgentMemory
+from ..agent_memory import AgentMemory
 
 if TYPE_CHECKING:
-    from novel2comic.src.context import GlobalContext, ServiceRegistry
-    from novel2comic.src.llm import UnifiedLLM
+    from ..context import GlobalContext, ServiceRegistry
+    from ..llm import UnifiedLLM
 
 SKILLS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),

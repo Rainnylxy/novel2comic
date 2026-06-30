@@ -20,9 +20,9 @@ from typing import TYPE_CHECKING, Optional
 # PromptContext removed — distiller uses UnifiedLLM.chat_json() directly
 
 if TYPE_CHECKING:
-    from novel2comic.src.llm import UnifiedLLM
-    from novel2comic.src.models import StoryGraph
-    from novel2comic.src.character_profile_models import CharacterProfile
+    from .llm import UnifiedLLM
+    from .models import StoryGraph
+    from .character_profile_models import CharacterProfile
 
 
 # ============================================================
@@ -262,7 +262,7 @@ class CharacterDistiller:
         Returns:
             CharacterProfile
         """
-        from novel2comic.src.character_profile_models import (
+        from .character_profile_models import (
             CharacterProfile, VoiceProfile, BoundaryProfile,
             StateProfile, SensitivityProfile, RecoveryProfile,
             SensitivityEntry, PolicyAnchor,
@@ -530,7 +530,7 @@ class CharacterDistiller:
 
         统计部分代码计算，主观部分 LLM 标注。
         """
-        from novel2comic.src.character_profile_models import VoiceProfile
+        from .character_profile_models import VoiceProfile
 
         # — 统计部分（代码直接计算）—
         stats = self._compute_voice_stats(char_text)
@@ -619,7 +619,7 @@ class CharacterDistiller:
         self, name: str, char_text: str, char_summary: str,
     ) -> "BoundaryProfile":
         """蒸馏 Boundary Profile。"""
-        from novel2comic.src.character_profile_models import BoundaryProfile
+        from .character_profile_models import BoundaryProfile
 
         profile = BoundaryProfile()
 
@@ -649,7 +649,7 @@ class CharacterDistiller:
         self, name: str, char_text: str, char_summary: str,
     ) -> dict:
         """蒸馏 State、Sensitivity、Recovery。"""
-        from novel2comic.src.character_profile_models import (
+        from .character_profile_models import (
             StateProfile, SensitivityProfile, RecoveryProfile, SensitivityEntry,
         )
 
@@ -701,7 +701,7 @@ class CharacterDistiller:
         self, name: str, char_text: str, char_summary: str,
     ) -> list:
         """蒸馏 Policy Anchors。"""
-        from novel2comic.src.character_profile_models import PolicyAnchor
+        from .character_profile_models import PolicyAnchor
 
         if not char_text.strip():
             return []

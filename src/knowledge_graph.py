@@ -3,7 +3,7 @@
 
 import json
 from typing import Optional
-from novel2comic.src.models import (
+from .models import (
     CharacterNode, RelationshipEdge, RelationEvent,
     StoryGraph,
     EventNode, LocationNode, OrganizationNode, ItemNode,
