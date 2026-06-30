@@ -17,7 +17,7 @@ from collections import Counter
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from novel2comic.src.prompt_context import PromptContext, PromptNeed
+# PromptContext removed — distiller uses UnifiedLLM.chat_json() directly
 
 if TYPE_CHECKING:
     from novel2comic.src.llm import UnifiedLLM
@@ -196,7 +196,7 @@ class CharacterDistiller:
     def __init__(self, llm: "UnifiedLLM", kg_service=None):
         self._llm = llm
         self._kg = kg_service
-        self._prompt_ctx = PromptContext(kg_service=kg_service)
+        # _prompt_ctx removed — no longer needed
 
     # ================================================================
     # 公有 API
