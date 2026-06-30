@@ -452,6 +452,30 @@ _EDGE_TYPE_MAP = {
 }
 
 
+# 节点类型 → Dataclass 映射（StoryGraph 内部用）
+_NODE_TYPE_MAP = {
+    "person": CharacterNode,
+    "event": EventNode,
+    "location": LocationNode,
+    "org": OrganizationNode,
+    "item": ItemNode,
+    "chapter": ChapterNode,
+}
+
+# 边类型 → Dataclass 映射（StoryGraph 内部用）
+_EDGE_TYPE_MAP = {
+    "relationship": RelationshipEdge,
+    "appears_in": AppearsInEdge,
+    "participates": ParticipatesEdge,
+    "occurs_in": OccursInEdge,
+    "located_at": LocatedAtEdge,
+    "belongs_to": BelongsToEdge,
+    "owns": OwnsEdge,
+    "event_relation": EventRelationEdge,
+    "location_hierarchy": LocationHierarchyEdge,
+}
+
+
 @dataclass
 class StoryGraph:
     """完整故事知识图谱——基于 NetworkX MultiDiGraph。
@@ -950,6 +974,74 @@ class StoryGraph:
                 groups[faction] = []
             groups[faction].append(node.name)
         return groups
+
+    # ================================================================
+    # 序列化
+    # ================================================================
+
+    def to_dict(self) -> dict:
+        return {
+            "_schema_version": self._schema_version,
+            "last_updated_chapter": self.last_updated_chapter,
+            "persons": [n.to_dict() for n in self.person_nodes],
+            "events": [n.to_dict() for n in self.event_nodes],
+            "locations": [n.to_dict() for n in self.location_nodes],
+            "organizations": [n.to_dict() for n in self.org_nodes],
+            "items": [n.to_dict() for n in self.item_nodes],
+            "chapters": [n.to_dict() for n in self.chapter_nodes],
+            "relationship_edges": [e.to_dict() for e in self.relationship_edges],
+            "appears_in_edges": [e.to_dict() for e in self.appears_in_edges],
+            "participates_edges": [e.to_dict() for e in self.participates_edges],
+            "occurs_in_edges": [e.to_dict() for e in self.occurs_in_edges],
+            "located_at_edges": [e.to_dict() for e in self.located_at_edges],
+            "belongs_to_edges": [e.to_dict() for e in self.belongs_to_edges],
+            "owns_edges": [e.to_dict() for e in self.owns_edges],
+            "event_relation_edges": [e.to_dict() for e in self.event_relation_edges],
+            "location_hierarchy_edges": [e.to_dict() for e in self.location_hierarchy_edges],
+            "timeline": [t.to_dict() for t in self.timeline],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "StoryGraph":
+        graph = cls(
+            last_updated_chapter=d.get("last_updated_chapter", 0),
+            _schema_version=2,
+        )
+
+        for pn_dict in d.get("persons", []):
+            graph.add_person_node(CharacterNode.from_dict(pn_dict))
+        for ev_dict in d.get("events", []):
+            graph.add_event_node(EventNode.from_dict(ev_dict))
+        for loc_dict in d.get("locations", []):
+            graph.add_location_node(LocationNode.from_dict(loc_dict))
+        for org_dict in d.get("organizations", []):
+            graph.add_org_node(OrganizationNode.from_dict(org_dict))
+        for item_dict in d.get("items", []):
+            graph.add_item_node(ItemNode.from_dict(item_dict))
+        for ch_dict in d.get("chapters", []):
+            graph.add_chapter_node(ChapterNode.from_dict(ch_dict))
+
+        for re_dict in d.get("relationship_edges", []):
+            graph.add_relationship_edge(RelationshipEdge.from_dict(re_dict))
+        for ai_dict in d.get("appears_in_edges", []):
+            graph.add_appears_in_edge(AppearsInEdge.from_dict(ai_dict))
+        for pe_dict in d.get("participates_edges", []):
+            graph.add_participates_edge(ParticipatesEdge.from_dict(pe_dict))
+        for oi_dict in d.get("occurs_in_edges", []):
+            graph.add_occurs_in_edge(OccursInEdge.from_dict(oi_dict))
+        for la_dict in d.get("located_at_edges", []):
+            graph.add_located_at_edge(LocatedAtEdge.from_dict(la_dict))
+        for bt_dict in d.get("belongs_to_edges", []):
+            graph.add_belongs_to_edge(BelongsToEdge.from_dict(bt_dict))
+        for ow_dict in d.get("owns_edges", []):
+            graph.add_owns_edge(OwnsEdge.from_dict(ow_dict))
+        for er_dict in d.get("event_relation_edges", []):
+            graph.add_event_relation_edge(EventRelationEdge.from_dict(er_dict))
+        for lh_dict in d.get("location_hierarchy_edges", []):
+            graph.add_location_hierarchy_edge(LocationHierarchyEdge.from_dict(lh_dict))
+
+        graph.timeline = [RelationEvent.from_dict(t) for t in d.get("timeline", [])]
+        return graph
 
     # ================================================================
     # 分镜指导（从人物关系推导）

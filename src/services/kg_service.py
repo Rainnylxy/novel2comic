@@ -13,10 +13,11 @@ from novel2comic.src.knowledge_graph import (
     update_story_graph_with_chapter,
     graph_to_context,
 )
+from novel2comic.src.models import StoryGraph
 
 if TYPE_CHECKING:
     from novel2comic.src.models import (
-        Novel, StoryGraph, CharacterNode, EventNode,
+        Novel, CharacterNode, EventNode,
         LocationNode, OrganizationNode, ItemNode,
         RelationshipEdge, ChapterInfo,
     )
@@ -49,19 +50,19 @@ class KnowledgeGraphService:
     def extract_incremental(
         self,
         chapters: list,
-        base_chapters: int = 3,
-        max_chars_per_chapter: int = 8000,
+        batch_size: int = 10,
+        max_chars_per_batch: int = 12000,
     ) -> "StoryGraph":
-        """逐章增量构建知识图谱。
+        """分批增量构建知识图谱。
 
-        - 前 base_chapters 章各自做全量提取，合并为基础 KG
-        - 后续章节做增量更新，每章只提取变化
-        - 每个章节获得专属 LLM 调用，避免信息压缩丢失
+        - 第一批做全量提取建立基础 KG
+        - 后续批次做增量更新
+        - batch_size 控制每批包含几章，平衡速度与精度
 
         Args:
             chapters: ChapterInfo 列表
-            base_chapters: 前几章做全量提取（默认 3）
-            max_chars_per_chapter: 每章最大字符数
+            batch_size: 每批处理的章节数（默认 10）
+            max_chars_per_batch: 每批最大字符数
 
         Returns:
             完整的 StoryGraph
@@ -74,28 +75,36 @@ class KnowledgeGraphService:
         client = self._llm._client if self._llm else None
         model = self._llm.model if self._llm else "deepseek-chat"
 
-        for i, ch in enumerate(chapters):
-            ch_text = (ch.content or "")[:max_chars_per_chapter]
-            if not ch_text.strip():
-                continue
+        # 将章节分组
+        batches = []
+        for i in range(0, total, batch_size):
+            batch = chapters[i:i + batch_size]
+            batches.append(batch)
 
-            progress = f"[KG] ({i+1}/{total}) 第{ch.index}章"
-            if i < base_chapters:
+        for bi, batch in enumerate(batches):
+            ch_range = f"第{batch[0].index}-{batch[-1].index}章"
+            batch_text = self._join_chapters(batch, max_chars_per_batch)
+            progress = f"[KG] ({bi+1}/{len(batches)}) {ch_range}"
+
+            if bi == 0:
+                # 第一批：全量提取
                 print(f"{progress} 全量提取...", end=" ", flush=True)
                 try:
                     partial = extract_story_graph_from_text(
-                        ch_text, openai_client=client, model=model,
+                        batch_text, openai_client=client, model=model,
                     )
                     graph = self._merge_graphs(graph, partial)
                     print(f"✓ ({partial.total_node_count} 节点)")
                 except Exception as e:
                     print(f"✗ ({e})")
             else:
+                # 后续批次：增量更新
                 print(f"{progress} 增量更新...", end=" ", flush=True)
                 try:
                     before = graph.total_node_count
+                    last_ch = batch[-1].index
                     graph = update_story_graph_with_chapter(
-                        graph, ch_text, ch.index,
+                        graph, batch_text, last_ch,
                         openai_client=client, model=model,
                     )
                     added = graph.total_node_count - before
@@ -103,7 +112,30 @@ class KnowledgeGraphService:
                 except Exception as e:
                     print(f"✗ ({e})")
 
+            # 每批后打印当前 KG 摘要
+            if graph.person_nodes:
+                top = sorted(graph.person_nodes, key=lambda n: -n.importance)[:5]
+                names = ", ".join(f"{n.name}({n.importance})" for n in top)
+                print(f"      角色: {names} | "
+                      f"事件: {len(graph.event_nodes)} | "
+                      f"关系: {len(graph.relationship_edges)}")
+
         return graph
+
+    @staticmethod
+    def _join_chapters(chapters: list, max_chars: int) -> str:
+        """将多个章节拼接为一批文本，不超过 max_chars。"""
+        parts = []
+        total = 0
+        per_ch = max_chars // max(len(chapters), 1)
+        for ch in chapters:
+            text = (ch.content or "")[:per_ch]
+            if text.strip():
+                parts.append(f"第{ch.index}章 {ch.title}\n{text}")
+                total += len(text)
+                if total >= max_chars:
+                    break
+        return "\n\n".join(parts)
 
     def update_with_chapter(
         self,

@@ -108,12 +108,38 @@ def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext):
     )
 
     print(f"[KG] 正在逐章提取知识图谱（{len(chapters)} 章）...")
-    ctx.novel.story_graph = services.kg.extract_incremental(chapters)
+    ctx.novel.story_graph = services.kg.extract_incremental(
+        chapters,
+        batch_size=int(os.getenv("KG_BATCH_SIZE", "10")),
+    )
     services.project.save_novel(ctx.novel)
-    print(f"[KG] 完成：{ctx.novel.story_graph.total_node_count} 个节点，"
-          f"{ctx.novel.story_graph.total_edge_count} 条边")
+    graph = ctx.novel.story_graph
+    print(f"[KG] 完成：{graph.total_node_count} 个节点，"
+          f"{graph.total_edge_count} 条边")
+
+    # 自动生成知识图谱可视化
+    _auto_viz(ctx, base_name)
 
     return base_name, chapters, text
+
+
+def _auto_viz(ctx: GlobalContext, base_name: str):
+    """KG 提取完成后自动生成 DOT 图。"""
+    graph = ctx.novel.story_graph if ctx.novel else None
+    if not graph or graph.total_node_count == 0:
+        return
+    from novel2comic.src.services.graph_viz import KnowledgeGraphVisualizer
+    viz = KnowledgeGraphVisualizer()
+    output_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "outputs",
+    )
+    dot_path = os.path.join(output_dir, f"{base_name}_kg.dot")
+    viz.render_dot(graph, dot_path)
+    print(f"  → 浏览器查看: https://dreampuf.github.io/GraphvizOnline/")
+    print(f"     (复制 {dot_path} 内容粘贴即可)")
+    print(f"  → 或安装 Graphviz: winget install graphviz")
+    print(f"     dot -Tpng {dot_path} -o {dot_path.replace('.dot', '.png')}")
 
 
 def _require_api_key():
@@ -552,7 +578,10 @@ async def run_viz(args):
     )
 
     print(f"[KG] 正在提取知识图谱（{len(chapters)} 章）...")
-    ctx.novel.story_graph = services.kg.extract_incremental(chapters)
+    ctx.novel.story_graph = services.kg.extract_incremental(
+        chapters,
+        batch_size=int(os.getenv("KG_BATCH_SIZE", "10")),
+    )
     services.project.save_novel(ctx.novel)
     print(f"[KG] 完成：{ctx.novel.story_graph.total_node_count} 个节点, "
           f"{ctx.novel.story_graph.total_edge_count} 条边")

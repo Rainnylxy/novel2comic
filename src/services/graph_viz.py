@@ -443,6 +443,82 @@ class KnowledgeGraphVisualizer:
         print(f"      节点: {len(vis_data['nodes'])}, 边: {len(vis_data['edges'])}")
         return output_path
 
+    def to_dot(self, graph: "StoryGraph", max_nodes: int = 100) -> str:
+        """生成 Graphviz DOT 格式字符串。
+
+        DOT 可以用 graphviz 渲染为 PNG/SVG:
+            dot -Tpng kg.dot -o kg.png
+
+        Args:
+            graph: StoryGraph 实例
+            max_nodes: 最多包含多少个节点
+
+        Returns:
+            DOT 格式字符串
+        """
+        lines = ['digraph StoryGraph {']
+        lines.append('  rankdir=LR;')
+        lines.append('  node [fontname="SimHei"];')
+        lines.append('  edge [fontname="SimHei"];')
+
+        # 节点
+        count = 0
+        for p in sorted(graph.person_nodes, key=lambda n: -n.importance)[:max_nodes]:
+            if count >= max_nodes:
+                break
+            node_id = f'person_{p.name.replace(" ", "_")}'
+            label = f"{p.name}\\n[{p.role_type}]"
+            color = NODE_CONFIG["person"]["color"]["background"]
+            lines.append(f'  "{node_id}" [label="{label}", shape=box, style=filled, fillcolor="{color}", fontcolor=white];')
+            count += 1
+
+        for ev in graph.event_nodes[:max_nodes]:
+            node_id = f'event_{ev.name.replace(" ", "_")}'
+            label = ev.name[:20]
+            color = NODE_CONFIG["event"]["color"]["background"]
+            lines.append(f'  "{node_id}" [label="{label}", shape=diamond, style=filled, fillcolor="{color}", fontcolor=white];')
+
+        for loc in graph.location_nodes[:20]:
+            node_id = f'loc_{loc.name.replace(" ", "_")}'
+            label = loc.name[:15]
+            color = NODE_CONFIG["location"]["color"]["background"]
+            lines.append(f'  "{node_id}" [label="{label}", shape=triangle, style=filled, fillcolor="{color}", fontcolor=white];')
+
+        # 边：人物关系
+        for re in graph.relationship_edges[:max_nodes]:
+            src = f'person_{re.from_char.replace(" ", "_")}'
+            dst = f'person_{re.to_char.replace(" ", "_")}'
+            label = re.relation_type
+            style = "dashed" if not re.public_knowledge else "solid"
+            lines.append(f'  "{src}" -> "{dst}" [label="{label}", style={style}];')
+
+        # 边：参与事件
+        for pe in graph.participates_edges[:max_nodes]:
+            src = f'person_{pe.person.replace(" ", "_")}'
+            dst = f'event_{pe.event.replace(" ", "_")}'
+            lines.append(f'  "{src}" -> "{dst}" [label="{pe.role}", style=dotted, color=gray];')
+
+        lines.append('}')
+        return '\n'.join(lines)
+
+    def render_dot(self, graph: "StoryGraph", output_path: str, max_nodes: int = 100) -> str:
+        """生成 DOT 文件。
+
+        Args:
+            graph: StoryGraph 实例
+            output_path: .dot 文件路径
+            max_nodes: 最多节点数
+
+        Returns:
+            输出路径
+        """
+        dot = self.to_dot(graph, max_nodes)
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(dot)
+        print(f"[Viz] DOT 图已生成: {output_path}")
+        return output_path
+
     def render_to_string(self, graph: "StoryGraph") -> str:
         """生成 HTML 字符串（不写文件）。"""
         vis_data = self.to_vis_data(graph)
