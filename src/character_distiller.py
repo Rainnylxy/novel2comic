@@ -16,6 +16,7 @@ import re
 from collections import Counter
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
+from .character_profile_models import VoiceProfile, BoundaryProfile, StateProfile, SensitivityProfile
 
 # PromptContext removed — distiller uses UnifiedLLM.chat_json() directly
 
@@ -525,12 +526,11 @@ class CharacterDistiller:
 
     def _distill_voice(
         self, name: str, char_text: str, char_summary: str,
-    ) -> "VoiceProfile":
+    ) -> VoiceProfile:
         """蒸馏 Voice Profile。
 
         统计部分代码计算，主观部分 LLM 标注。
         """
-        from .character_profile_models import VoiceProfile
 
         # — 统计部分（代码直接计算）—
         stats = self._compute_voice_stats(char_text)
@@ -617,9 +617,8 @@ class CharacterDistiller:
 
     def _distill_boundary(
         self, name: str, char_text: str, char_summary: str,
-    ) -> "BoundaryProfile":
+    ) -> BoundaryProfile:
         """蒸馏 Boundary Profile。"""
-        from .character_profile_models import BoundaryProfile
 
         profile = BoundaryProfile()
 

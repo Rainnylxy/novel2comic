@@ -147,4 +147,11 @@ class BaseAgent:
         elif self._needs_rebuild:
             await self.rebuild()
             self._needs_rebuild = False
-        return await self._built_agent.run(task)
+        result = await self._built_agent.run(task)
+        # Post-turn 钩子：子类可覆盖以写入 episodic memory 等
+        self._on_post_turn(task, result)
+        return result
+
+    def _on_post_turn(self, user_msg: str, assistant_msg: str):
+        """Post-turn 钩子。子类覆盖以实现记忆写入等逻辑。"""
+        pass
