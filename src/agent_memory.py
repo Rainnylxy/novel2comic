@@ -12,6 +12,7 @@
 import json
 import os
 from dataclasses import dataclass, field
+from .scene_engine import SceneContext
 
 
 # ============================================================
@@ -44,6 +45,9 @@ class RolePlayState:
     # [{"event": "...", "deltas": {...}, "timestamp": "..."}]
     sensitivity_profile: dict = field(default_factory=dict)
     recovery_profile: dict = field(default_factory=dict)
+
+    # ── 场景锚定 ──
+    scene: "SceneContext" = field(default_factory=SceneContext)
 
     # ── 知识过滤 ──
 
@@ -197,10 +201,12 @@ class RolePlayState:
             "state_history": self.state_history[-30:],
             "sensitivity_profile": self.sensitivity_profile,
             "recovery_profile": self.recovery_profile,
+            "scene": self.scene.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "RolePlayState":
+        scene_data = d.get("scene", {})
         return cls(
             active_character=d.get("active_character", ""),
             story_timeline_point=d.get("story_timeline_point", 0),
@@ -212,6 +218,7 @@ class RolePlayState:
             state_history=d.get("state_history", []),
             sensitivity_profile=d.get("sensitivity_profile", {}),
             recovery_profile=d.get("recovery_profile", {}),
+            scene=SceneContext.from_dict(scene_data) if scene_data else SceneContext(),
         )
 
 

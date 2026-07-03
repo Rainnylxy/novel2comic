@@ -101,10 +101,52 @@ class RolePlayAgent(BaseAgent):
         # Episodic memory 写入追踪
         self._turn_count = 0
         self._pending_turns: list = []  # [(user_msg, assistant_msg), ...]
+        # NPC 模式
+        self._npc_mode = False
+        self._npc_user_name = ""
+        self._npc_attitude = ""
+        self._original_identity = ""  # 保存原始 system prompt，退出 NPC 模式时恢复
 
     @property
     def rp(self):
         return self._memory.roleplay
+
+    # ================================================================
+    # NPC 模式 (Director 调用)
+    # ================================================================
+
+    def set_npc_mode(self, user_name: str, attitude: str):
+        """设置为 NPC 模式。
+
+        Director 通过 NPCManager 调用此方法，在 system prompt 末尾注入
+        当前角色对用户角色的态度描述。
+
+        Args:
+            user_name: 用户角色名
+            attitude: 亲密度态度描述，如 "你对林默有所戒备，话少，谨慎"
+        """
+        self._npc_mode = True
+        self._npc_user_name = user_name
+        self._npc_attitude = attitude
+
+        if self._identity_prompt and not self._original_identity:
+            self._original_identity = self._identity_prompt
+
+        # 在现有 identity 后追加态度段落
+        base = self._original_identity or self._identity_prompt or ""
+        npc_section = (
+            f"\n## 对用户角色的态度\n"
+            f"当前与你对话的人是 {user_name}。{attitude}。\n"
+            f"请根据你对 {user_name} 的态度调整你的语气、用词和信息透露程度。\n"
+        )
+        self.set_identity(base + npc_section)
+
+    def clear_npc_mode(self):
+        """退出 NPC 模式，恢复原始 system prompt。"""
+        self._npc_mode = False
+        if self._original_identity:
+            self.set_identity(self._original_identity)
+            self._original_identity = ""
 
     # ================================================================
     # Post-turn 钩子 —— 周期性写入 EpisodicMemory
@@ -166,11 +208,17 @@ class RolePlayAgent(BaseAgent):
     # 角色初始化（外部调用，不是 Tool）
     # ================================================================
 
-    def init_character(self, character_name: str, scenario: str = ""):
+    def init_character(self, character_name: str, scenario: str = "",
+                       start_chapter: int = 0):
         """加载角色配置，设置心智引擎的 system prompt。
 
         替代旧版 start_conversation Tool。
         外部（cli.py）在 Agent 创建后、对话开始前调用。
+
+        Args:
+            character_name: 角色名
+            scenario: 初始场景描述（可空）
+            start_chapter: 起始章节 (1-based)。0=自动使用首次出场章节
         """
         graph = self._ctx.novel.story_graph if self._ctx.novel else None
         if not graph:
@@ -184,8 +232,16 @@ class RolePlayAgent(BaseAgent):
 
         rp = self.rp
         rp.active_character = character_name
-        rp.story_timeline_point = person.first_appearance_chapter
+
+        # 确定起始章节
+        chapter = start_chapter or person.first_appearance_chapter or 1
+        total = len(self._ctx.novel.chapters) if self._ctx.novel else 0
+        chapter = max(1, min(chapter, total)) if total else chapter
+        rp.story_timeline_point = chapter
         rp.active_location = scenario or "未知地点"
+
+        # 场景锚定
+        self._init_scene(character_name, chapter)
 
         # 知识过滤
         knowledge = rp.build_knowledge_filter(character_name, graph)
@@ -210,9 +266,50 @@ class RolePlayAgent(BaseAgent):
         )
         self.set_identity(identity)
 
+    def _init_scene(self, character_name: str, chapter: int):
+        """初始化场景上下文（从 KG + 章节文本）。"""
+        graph = self._ctx.novel.story_graph if self._ctx.novel else None
+        chapters = self._ctx.novel.chapters if self._ctx.novel else []
+        if not graph or not chapters:
+            return
+        try:
+            from ..scene_engine import SceneEngine
+            self.rp.scene = SceneEngine.build_scene(
+                graph, chapters, chapter, character_name,
+            )
+        except Exception:
+            pass
+
     def switch_character(self, character_name: str):
-        """切换到另一个角色（外部调用）。"""
-        return self.init_character(character_name, self.rp.active_location)
+        """切换到另一个角色（外部调用）。保持当前章节不变。"""
+        return self.init_character(
+            character_name,
+            self.rp.active_location,
+            start_chapter=self.rp.story_timeline_point,
+        )
+
+    def switch_chapter(self, chapter: int):
+        """跳转到指定章节（外部调用，由 /goto 命令触发）。
+
+        不重建 system prompt——只更新知识过滤 + 场景上下文 + 动态前缀。
+        """
+        char = self.rp.active_character
+        graph = self._ctx.novel.story_graph if self._ctx.novel else None
+        chapters = self._ctx.novel.chapters if self._ctx.novel else []
+        if not graph or not chapters or not char:
+            return
+
+        total = len(chapters)
+        chapter = max(1, min(chapter, total))
+        rp = self.rp
+        rp.story_timeline_point = chapter
+
+        # 重建知识过滤（新的时间线点）
+        knowledge = rp.build_knowledge_filter(char, graph)
+        rp.character_knowledge[char] = knowledge
+
+        # 重建场景上下文
+        self._init_scene(char, chapter)
 
     # ================================================================
     # 引擎 System Prompt 构建
@@ -253,9 +350,8 @@ class RolePlayAgent(BaseAgent):
         if char_profile:
             prompt += self._format_profile_sections(char_profile)
 
-        # 场景
-        if scenario:
-            prompt += f"\n当前场景: {scenario}\n"
+        # 场景锚定（system prompt 中的固定部分）
+        prompt += self._format_scene_for_system_prompt()
 
         # 引擎指令
         prompt += """
@@ -278,7 +374,35 @@ class RolePlayAgent(BaseAgent):
         return prompt
 
     # ================================================================
-    # Profile 格式化（同 V2）
+    # 场景格式化
+    # ================================================================
+
+    def _format_scene_for_system_prompt(self) -> str:
+        """构建 system prompt 中的场景锚定段落。"""
+        scene = self.rp.scene
+        if not scene or scene.chapter_index == 0:
+            return ""
+
+        lines = [
+            "## 当前场景锚定",
+            f"你正处于第 {scene.chapter_index} 章"
+            + (f"「{scene.chapter_title}」" if scene.chapter_title else ""),
+            f"全书共 {scene.total_chapters} 章",
+        ]
+        if scene.location:
+            lines.append(f"当前地点: {scene.location}")
+        if scene.present_characters:
+            lines.append(f"在场人物: {', '.join(scene.present_characters[:8])}")
+        if scene.recent_events:
+            lines.append("本章经历的事件:")
+            for e in scene.recent_events[:5]:
+                summary = e.get("summary", e.get("name", ""))
+                lines.append(f"  - {summary[:80]}")
+        lines.append("注意: 你只知道这一章及之前发生的事。不要表现出知道后续情节。")
+        return "\n".join(lines) + "\n"
+
+    # ================================================================
+    # Profile 格式化
     # ================================================================
 
     def _format_profile_sections(self, char_profile) -> str:
@@ -358,21 +482,34 @@ class RolePlayAgent(BaseAgent):
     # ================================================================
 
     def _build_dynamic_prefix(self) -> str:
+        """构建注入 user message 的动态前缀。
+
+        包含两层信息：
+        - 当前心理状态（runtime_state 变化时更新）
+        - 当前场景锚定（/goto 跳转时更新）
+        两者都不在 system prompt 中，保持 cache 有效。
+        """
         rp = self.rp
-        if not rp.runtime_state:
-            return ""
-        parts = []
-        state_str = rp.format_state_for_prompt()
-        if state_str:
-            parts.append(state_str)
-        emotion = rp.get_emotion_summary()
-        if emotion and emotion != "情绪平稳":
-            parts.append(f"情绪: {emotion}")
-        if rp.active_location:
-            parts.append(f"位置: {rp.active_location}")
-        if not parts:
-            return ""
-        return "[当前状态] " + " | ".join(parts) + "\n\n"
+        result = ""
+
+        # 状态层
+        if rp.runtime_state:
+            parts = []
+            state_str = rp.format_state_for_prompt()
+            if state_str:
+                parts.append(state_str)
+            emotion = rp.get_emotion_summary()
+            if emotion and emotion != "情绪平稳":
+                parts.append(f"情绪: {emotion}")
+            if parts:
+                result += "[当前状态] " + " | ".join(parts) + "\n"
+
+        # 场景层
+        scene_str = rp.scene.format_for_prompt() if rp.scene else ""
+        if scene_str:
+            result += scene_str
+
+        return result + "\n" if result else ""
 
     async def run(self, task: str):
         prefix = self._build_dynamic_prefix()
