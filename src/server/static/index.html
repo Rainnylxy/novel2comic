@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📖 互动小说引擎</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-panel: #161b22;
+    --bg-input: #21262d;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --accent: #d4a853;
+    --accent-glow: #f0c060;
+    --danger: #f85149;
+    --green: #3fb950;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.7;
+  }
+
+  /* ===== 启动画面 ===== */
+  #start-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  #start-screen h1 {
+    font-size: 2.5rem;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+    text-shadow: 0 0 20px rgba(212,168,83,0.3);
+  }
+
+  #start-screen .subtitle {
+    color: var(--text-dim);
+    margin-bottom: 2rem;
+  }
+
+  #start-form {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    width: 100%;
+    max-width: 480px;
+  }
+
+  #start-form label {
+    display: block;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    margin: 1rem 0 0.3rem;
+  }
+
+  #start-form input {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 1rem;
+  }
+
+  #start-form input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  #start-form button {
+    width: 100%;
+    margin-top: 1.5rem;
+    padding: 0.8rem;
+    background: var(--accent);
+    color: #0d1117;
+    border: none;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    font-family: inherit;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  #start-form button:hover {
+    background: var(--accent-glow);
+  }
+
+  /* ===== 游戏主界面 ===== */
+  #game-screen {
+    display: none;
+    min-height: 100vh;
+  }
+
+  #game-layout {
+    display: flex;
+    max-width: 1200px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+
+  /* 主对话区 */
+  #main-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 1rem;
+  }
+
+  #header {
+    padding: 0.5rem 0 1rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.5rem;
+  }
+
+  #header .novel-title {
+    font-size: 1.3rem;
+    color: var(--accent);
+  }
+
+  #header .scene-info {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-top: 0.2rem;
+  }
+
+  /* 对话区 */
+  #dialogue-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem 0;
+    scroll-behavior: smooth;
+  }
+
+  #dialogue-area::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  #dialogue-area::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+
+  /* 消息气泡 */
+  .msg {
+    margin: 0.8rem 0;
+    padding: 0.6rem 1rem;
+    border-left: 3px solid var(--border);
+    border-radius: 0 8px 8px 0;
+    animation: fadeIn 0.3s ease;
+    background: var(--bg-panel);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .msg.narrate {
+    border-left-color: var(--text-dim);
+    font-style: italic;
+    color: var(--text-dim);
+    background: transparent;
+    border-left: 2px dashed var(--border);
+  }
+
+  .msg.dialogue .msg-header {
+    font-weight: bold;
+    font-size: 0.9rem;
+    margin-bottom: 0.2rem;
+  }
+
+  .msg.dialogue .msg-body {
+    font-size: 1rem;
+  }
+
+  .msg.user-msg {
+    border-left-color: var(--blue);
+  }
+
+  .msg.user-msg .msg-header {
+    color: var(--blue);
+  }
+
+  /* 抉择面板 */
+  #choice-panel {
+    display: none;
+    margin: 1rem 0;
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+    background: rgba(212,168,83,0.05);
+    padding: 1rem 1.2rem;
+    animation: fadeIn 0.4s ease;
+  }
+
+  #choice-panel .choice-moment {
+    color: var(--accent);
+    font-size: 1rem;
+    font-weight: bold;
+    margin-bottom: 1rem;
+  }
+
+  .choice-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.7rem 1rem;
+    margin: 0.4rem 0;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .choice-btn:hover {
+    border-color: var(--accent);
+    background: rgba(212,168,83,0.1);
+    color: var(--accent-glow);
+  }
+
+  /* 输入区 */
+  #input-area {
+    display: flex;
+    gap: 0.5rem;
+    padding: 1rem 0;
+    border-top: 1px solid var(--border);
+  }
+
+  #input-area input {
+    flex: 1;
+    padding: 0.7rem 1rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 1rem;
+  }
+
+  #input-area input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  #input-area button {
+    padding: 0.7rem 1.5rem;
+    background: var(--accent);
+    color: #0d1117;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  #input-area button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* 侧栏 */
+  #sidebar {
+    width: 260px;
+    padding: 1.5rem 1rem;
+    border-left: 1px solid var(--border);
+    background: var(--bg-panel);
+    overflow-y: auto;
+  }
+
+  #sidebar h3 {
+    color: var(--accent);
+    font-size: 0.95rem;
+    margin: 1.2rem 0 0.6rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #sidebar h3:first-child {
+    margin-top: 0;
+  }
+
+  .intimacy-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3rem 0;
+    font-size: 0.9rem;
+  }
+
+  .intimacy-bar {
+    width: 80px;
+    height: 6px;
+    background: var(--bg-input);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .intimacy-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+  }
+
+  .flag-item {
+    font-size: 0.85rem;
+    padding: 0.2rem 0;
+    color: var(--text-dim);
+  }
+
+  .flag-item.set {
+    color: var(--green);
+  }
+
+  .ending-hint {
+    font-size: 0.9rem;
+    padding: 0.5rem;
+    background: var(--bg-input);
+    border-radius: 6px;
+    color: var(--accent);
+  }
+
+  /* 响应式 */
+  @media (max-width: 768px) {
+    #game-layout { flex-direction: column; }
+    #sidebar {
+      width: 100%;
+      border-left: none;
+      border-top: 1px solid var(--border);
+      padding: 1rem;
+    }
+  }
+
+  /* 加载指示器 */
+  .typing-indicator {
+    display: none;
+    color: var(--text-dim);
+    font-style: italic;
+    padding: 0.5rem 1rem;
+    animation: blink 1s infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 启动画面 ===== -->
+<div id="start-screen">
+  <h1>📖 互动小说引擎</h1>
+  <p class="subtitle">进入小说世界，你的选择改变结局</p>
+  <form id="start-form">
+    <label>小说文件路径</label>
+    <input type="text" id="f-novel" value="novels/poyun.txt" required>
+
+    <label>起始章节</label>
+    <input type="number" id="f-chapter" value="24" min="1" required>
+
+    <label>你的角色名</label>
+    <input type="text" id="f-user" value="林默" required>
+
+    <label>你的身份</label>
+    <input type="text" id="f-identity" value="新调来的刑警" required>
+
+    <label>NPC 角色 (逗号分隔，留空自动检测)</label>
+    <input type="text" id="f-npcs" value="" placeholder="如: 江停,严峫">
+
+    <button type="submit">🎭 开始游戏</button>
+  </form>
+</div>
+
+<!-- ===== 游戏主界面 ===== -->
+<div id="game-screen">
+  <div id="game-layout">
+    <!-- 主对话区 -->
+    <div id="main-panel">
+      <div id="header">
+        <div class="novel-title" id="h-title">📖 加载中...</div>
+        <div class="scene-info" id="h-scene"></div>
+      </div>
+
+      <div id="dialogue-area">
+        <div class="typing-indicator" id="typing">⏳ 角色正在思考...</div>
+      </div>
+
+      <div id="choice-panel">
+        <div class="choice-moment" id="choice-title"></div>
+        <div id="choice-buttons"></div>
+      </div>
+
+      <div id="input-area">
+        <input type="text" id="user-input" placeholder="输入你想说的话..." autocomplete="off">
+        <button id="send-btn">发送</button>
+      </div>
+    </div>
+
+    <!-- 侧栏 -->
+    <div id="sidebar">
+      <h3>📊 亲密度</h3>
+      <div id="intimacy-list"></div>
+
+      <h3>📋 剧情旗标</h3>
+      <div id="flags-list"></div>
+
+      <h3>🎯 结局倾向</h3>
+      <div class="ending-hint" id="ending-hint">暂无数据</div>
+
+      <h3>⏱ 统计</h3>
+      <div id="stats-info" style="font-size:0.85rem;color:var(--text-dim)"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 状态
+// ============================================================
+let sessionId = null;
+let eventSource = null;
+let isWaiting = false;
+
+// 角色颜色映射（从角色名 hash 生成）
+const CHAR_COLORS = {};
+
+function charColor(name) {
+  if (!CHAR_COLORS[name]) {
+    const colors = ['#58a6ff','#3fb950','#bc8cff','#f0883e','#f85149','#d29922','#79c0ff','#a5d6ff'];
+    let hash = 0;
+    for (let c of name) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+    CHAR_COLORS[name] = colors[Math.abs(hash) % colors.length];
+  }
+  return CHAR_COLORS[name];
+}
+
+// ============================================================
+// 启动
+// ============================================================
+document.getElementById('start-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button');
+  btn.disabled = true;
+  btn.textContent = '⏳ 正在加载小说和构建知识图谱...';
+
+  const body = {
+    novel_path: document.getElementById('f-novel').value.trim(),
+    chapter: parseInt(document.getElementById('f-chapter').value) || 1,
+    user_name: document.getElementById('f-user').value.trim() || '林默',
+    user_identity: document.getElementById('f-identity').value.trim() || '新调来的刑警',
+    npcs: document.getElementById('f-npcs').value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
+  };
+
+  try {
+    const resp = await fetch('/api/play/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) { alert('启动失败: ' + data.error); btn.disabled = false; btn.textContent = '🎭 开始游戏'; return; }
+
+    sessionId = data.session_id;
+    document.getElementById('start-screen').style.display = 'none';
+    document.getElementById('game-screen').style.display = 'block';
+
+    document.getElementById('h-title').textContent = `📖 加载完成`;
+    updateSidebar(data.state);
+    connectSSE();
+  } catch (err) {
+    alert('连接失败: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = '🎭 开始游戏';
+  }
+});
+
+// ============================================================
+// SSE 事件流
+// ============================================================
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/api/play/stream?session_id=${sessionId}`);
+
+  eventSource.addEventListener('narrate', (e) => {
+    const data = JSON.parse(e.data);
+    appendMessage('narrate', data.text);
+    hideTyping();
+  });
+
+  eventSource.addEventListener('dialogue', (e) => {
+    const data = JSON.parse(e.data);
+    appendMessage('dialogue', data.text, data.character);
+    hideTyping();
+  });
+
+  eventSource.addEventListener('choice', (e) => {
+    const data = JSON.parse(e.data);
+    showChoice(data);
+    hideTyping();
+  });
+
+  eventSource.addEventListener('state_update', (e) => {
+    const data = JSON.parse(e.data);
+    updateSidebarFromEvent(data);
+  });
+
+  eventSource.addEventListener('user_message', (e) => {
+    const data = JSON.parse(e.data);
+    appendMessage('user_msg', data.text, '你');
+    showTyping();
+  });
+
+  eventSource.addEventListener('error', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      appendMessage('narrate', '⚠ ' + data.text);
+    } catch (_) {}
+    hideTyping();
+  });
+}
+
+// ============================================================
+// 消息渲染
+// ============================================================
+function appendMessage(type, text, character) {
+  hideTyping();
+  const area = document.getElementById('dialogue-area');
+  const div = document.createElement('div');
+  div.className = 'msg ' + (type === 'narrate' ? 'narrate' : 'dialogue');
+
+  if (type === 'dialogue' && character) {
+    const color = charColor(character);
+    div.style.borderLeftColor = color;
+    div.innerHTML = `<div class="msg-header" style="color:${color}">${escapeHtml(character)}</div>
+                     <div class="msg-body">${escapeHtml(text)}</div>`;
+  } else if (type === 'user_msg') {
+    div.classList.add('user-msg');
+    div.innerHTML = `<div class="msg-header">${escapeHtml(character || '你')}</div>
+                     <div class="msg-body">${escapeHtml(text)}</div>`;
+  } else {
+    div.textContent = text;
+  }
+
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+}
+
+function showTyping() {
+  isWaiting = true;
+  document.getElementById('typing').style.display = 'block';
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('dialogue-area').scrollTop = document.getElementById('dialogue-area').scrollHeight;
+}
+
+function hideTyping() {
+  isWaiting = false;
+  document.getElementById('typing').style.display = 'none';
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('user-input').focus();
+}
+
+// ============================================================
+// 抉择渲染
+// ============================================================
+function showChoice(data) {
+  const panel = document.getElementById('choice-panel');
+  const title = document.getElementById('choice-title');
+  const buttons = document.getElementById('choice-buttons');
+
+  title.textContent = '⚡ ' + (data.moment || '抉择时刻');
+  buttons.innerHTML = '';
+
+  const letters = ['A', 'B', 'C'];
+  data.choices.forEach((c, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'choice-btn';
+    btn.textContent = `${letters[i]}) ${c.text}`;
+    btn.addEventListener('click', () => submitChoice(i));
+    buttons.appendChild(btn);
+  });
+
+  panel.style.display = 'block';
+  document.getElementById('input-area').style.display = 'none';
+  panel.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function submitChoice(index) {
+  document.getElementById('choice-panel').style.display = 'none';
+  document.getElementById('input-area').style.display = 'flex';
+  showTyping();
+
+  try {
+    await fetch('/api/play/choice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, choice_index: index }),
+    });
+  } catch (err) {
+    appendMessage('narrate', '⚠ 提交选择失败: ' + err.message);
+    hideTyping();
+  }
+}
+
+// ============================================================
+// 发送消息
+// ============================================================
+async function sendMessage() {
+  const input = document.getElementById('user-input');
+  const text = input.value.trim();
+  if (!text || isWaiting) return;
+
+  input.value = '';
+  showTyping();
+
+  try {
+    await fetch('/api/play/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, text: text }),
+    });
+  } catch (err) {
+    appendMessage('narrate', '⚠ 发送失败: ' + err.message);
+    hideTyping();
+  }
+}
+
+document.getElementById('send-btn').addEventListener('click', sendMessage);
+document.getElementById('user-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendMessage();
+});
+
+// ============================================================
+// 侧栏更新
+// ============================================================
+function updateSidebar(state) {
+  if (!state) return;
+
+  // 亲密度
+  const intimacy = state.intimacy || {};
+  const intimacyList = document.getElementById('intimacy-list');
+  intimacyList.innerHTML = Object.entries(intimacy).map(([name, score]) => {
+    const pct = Math.abs(score);
+    const bar = Math.min(100, Math.abs(score));
+    const color = score >= 0 ? 'var(--green)' : 'var(--danger)';
+    const fillColor = score >= 50 ? 'var(--green)' : score >= 0 ? 'var(--blue)' : 'var(--danger)';
+    return `<div class="intimacy-item">
+      <span>${escapeHtml(name)}</span>
+      <span style="font-size:0.8rem;width:30px;text-align:right">${score >= 0 ? '+' : ''}${score}</span>
+      <div class="intimacy-bar"><div class="intimacy-fill" style="width:${bar}%;background:${fillColor}"></div></div>
+    </div>`;
+  }).join('') || '<div style="color:var(--text-dim);font-size:0.85rem">暂无数据</div>';
+
+  // 旗标
+  const flags = state.plot_flags || {};
+  const flagsList = document.getElementById('flags-list');
+  flagsList.innerHTML = Object.entries(flags).map(([k, v]) => {
+    return `<div class="flag-item ${v ? 'set' : ''}">${v ? '☑' : '☐'} ${escapeHtml(k)}</div>`;
+  }).join('') || '<div style="color:var(--text-dim);font-size:0.85rem">暂无</div>';
+
+  // 结局倾向
+  const ending = state.active_ending || 'neutral';
+  const endingNames = { partner: '🤝 搭档线', lone_wolf: '🐺 孤狼线', sacrifice: '💀 牺牲线', neutral: '➖ 中立' };
+  document.getElementById('ending-hint').textContent = endingNames[ending] || ending;
+
+  // 统计
+  document.getElementById('stats-info').innerHTML =
+    `章节: ${state.chapter || '?'}/${state.total_chapters || '?'}<br>` +
+    `轮次: ${state.total_turns || 0}<br>` +
+    `决策: ${(state.regular_decisions || []).length + (state.pivot_decisions || []).length}`;
+
+  // 标题
+  if (state.chapter) {
+    document.getElementById('h-scene').textContent =
+      `第${state.chapter}/${state.total_chapters}章 | 轮次: ${state.total_turns}`;
+  }
+}
+
+function updateSidebarFromEvent(data) {
+  updateSidebar({
+    intimacy: data.intimacy,
+    plot_flags: data.plot_flags,
+    active_ending: data.active_ending,
+    chapter: null,
+    total_chapters: null,
+    total_turns: null,
+    regular_decisions: null,
+    pivot_decisions: null,
+  });
+}
+
+// 定期拉取完整状态
+setInterval(async () => {
+  if (!sessionId) return;
+  try {
+    const resp = await fetch(`/api/play/state?session_id=${sessionId}`);
+    const state = await resp.json();
+    updateSidebar(state);
+  } catch (_) {}
+}, 5000);
+
+// ============================================================
+// 工具
+// ============================================================
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+</script>
+
+</body>
+</html>

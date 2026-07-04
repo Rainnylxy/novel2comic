@@ -378,6 +378,22 @@ async def run_play(args):
 # 命令入口
 # ============================================================
 
+async def run_server(args):
+    """启动 Web 服务。"""
+    api_key = _require_api_key()
+    base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
+    model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
+    tool_model = os.getenv("AGENTFLOW_TOOL_MODEL", model)
+    proxy = os.getenv("AGENTFLOW_PROXY", "")
+
+    ctx, services, llm = _build_context_and_services(api_key, base_url, model, proxy, tool_model)
+
+    port = getattr(args, "port", 8000)
+
+    from ..server import start_server
+    start_server(ctx, services, llm, port)
+
+
 async def run_roleplay(args):
     """角色扮演模式。"""
     api_key = _require_api_key()
@@ -440,6 +456,10 @@ def main():
     play.add_argument("--npcs", nargs="+", default=[],
                       help="指定 NPC 角色列表，如: 江停 严峫。不指定则自动从 KG 检测")
 
+    # server — Web 服务模式
+    srv = subparsers.add_parser("server", help="启动 Web 服务 (互动小说前端)")
+    srv.add_argument("--port", type=int, default=8000, help="监听端口 (默认 8000)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -448,5 +468,7 @@ def main():
 
     if args.command == "play":
         asyncio.run(run_play(args))
+    elif args.command == "server":
+        run_server(args)
     else:
         asyncio.run(run_roleplay(args))
