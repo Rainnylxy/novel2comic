@@ -51,6 +51,7 @@ class ChapterWriter:
         self._style_profile = None
         self._previous_chapter_ending: str = ""
         self._character_profiles: dict = {}
+        self._character_statuses: dict = {}  # {name: status}  from KG
 
     def set_context(
         self,
@@ -58,12 +59,14 @@ class ChapterWriter:
         style_profile,
         previous_chapter_ending: str,
         character_profiles: dict,
+        character_statuses: dict = None,
     ):
         """设置 Writer 运行时上下文。"""
         self._outline = outline
         self._style_profile = style_profile
         self._previous_chapter_ending = previous_chapter_ending
         self._character_profiles = character_profiles
+        self._character_statuses = character_statuses or {}
 
     async def inject(self, instruction: str):
         """注入用户指令。触发当前流中断并重连。
@@ -125,8 +128,8 @@ class ChapterWriter:
         import httpx
 
         api_key = os.getenv("AGENTFLOW_API_KEY", "")
-        base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
-        model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
+        base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/")
+        model = os.getenv("AGENTFLOW_MODEL", "deepseek-v4-pro")
         proxy = os.getenv("AGENTFLOW_PROXY", "")
 
         url = f"{base_url.rstrip('/')}/chat/completions"
@@ -244,6 +247,20 @@ class ChapterWriter:
             exemplars_text = self._style_profile.exemplars_text()
             if exemplars_text:
                 parts.append("\n" + exemplars_text)
+
+        # 注入角色生死状态（硬约束）
+        if self._character_statuses:
+            dead_chars = [n for n, s in self._character_statuses.items()
+                          if s in ("dead", "deceased", "killed")]
+            missing_chars = [n for n, s in self._character_statuses.items()
+                             if s == "missing"]
+            if dead_chars:
+                parts.append("\n## ⚠️ 角色生死状态（绝对约束，违反即为严重错误）")
+                parts.append(f"以下角色**已经死亡**，绝不能以存活状态出现在续写中: {', '.join(dead_chars)}")
+                parts.append("已死亡角色只能以回忆、闪回、幻觉、他人提及的方式出现。不能让已死亡角色说话、行动或参与任何当前时间线的事件。")
+            if missing_chars:
+                parts.append(f"以下角色**下落不明**: {', '.join(missing_chars)}")
+                parts.append("下落不明角色不能直接出现，只能通过线索或他人转述提及。")
 
         # 注入角色约束
         if self._character_profiles:

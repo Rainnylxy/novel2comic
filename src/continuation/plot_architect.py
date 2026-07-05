@@ -48,6 +48,7 @@ class PlotArchitect(BaseAgent):
         last_chapter: int,
         style_profile: Optional["AuthorStyleProfile"] = None,
         user_instruction: str = "",
+        character_statuses: dict = None,
     ):
         """设置 Plot Architect 的运行时上下文。
 
@@ -59,6 +60,7 @@ class PlotArchitect(BaseAgent):
             last_chapter: 当前最后一章的章节号
             style_profile: AuthorStyleProfile
             user_instruction: 用户的初始指令（可选）
+            character_statuses: {name: status} 角色生死状态
         """
         self._outline_context = {
             "previous_chapter_ending": previous_chapter_ending,
@@ -66,6 +68,7 @@ class PlotArchitect(BaseAgent):
             "character_profiles": character_profiles,
             "last_chapter": last_chapter,
             "user_instruction": user_instruction,
+            "character_statuses": character_statuses or {},
         }
         self._needs_rebuild = True
 
@@ -85,6 +88,14 @@ class PlotArchitect(BaseAgent):
 
         if ctx.get("user_instruction"):
             lines.append(f"\n用户指令: {ctx['user_instruction']}")
+
+        # 角色生死状态（硬约束）
+        char_statuses = ctx.get("character_statuses", {})
+        dead_chars = [n for n, s in char_statuses.items()
+                      if s in ("dead", "deceased", "killed")]
+        if dead_chars:
+            lines.append(f"\n⚠️ 以下角色已死亡，绝不能在新章节中以存活状态出场: {', '.join(dead_chars)}")
+            lines.append("只能以回忆、闪回、他人提及的方式出现。")
 
         if ctx.get("style_summary"):
             lines.append(f"\n{ctx['style_summary']}")
@@ -220,6 +231,14 @@ class PlotArchitect(BaseAgent):
                 JSON 格式的角色节拍
             """
             names = [n.strip() for n in character_names.split(",") if n.strip()]
+            # 过滤已死亡角色
+            char_statuses = outline_ctx.get("character_statuses", {})
+            dead = {n for n, s in char_statuses.items() if s in ("dead", "deceased", "killed")}
+            alive_names = [n for n in names if n not in dead]
+            if len(alive_names) < len(names):
+                skipped = set(names) - set(alive_names)
+                logger.warning("sketch_character_beats: 跳过已死亡角色 %s", skipped)
+            names = alive_names
             graph = ctx.novel.story_graph if ctx.novel else None
 
             char_info = {}

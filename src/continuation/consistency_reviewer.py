@@ -195,9 +195,16 @@ class ConsistencyReviewer(BaseAgent):
                 result = llm.chat_json(
                     system_prompt="你是设定一致性检查器。检查续写内容是否与已有设定矛盾。只返回 JSON。",
                     user_prompt=(
-                        f"## 已有设定\n{json.dumps(settings, ensure_ascii=False, indent=2)}\n\n"
+                        f"## 已有设定（特别注意 status 字段: dead=已死亡, missing=失踪, active=存活）\n"
+                        f"{json.dumps(settings, ensure_ascii=False, indent=2)}\n\n"
                         f"## 草稿内容\n{draft_snippet}\n\n"
-                        f"检查是否有设定矛盾。返回 JSON: {{\"issues\": [...]}}"
+                        f"重点检查:\n"
+                        f"1. status=dead/deceased 的角色是否被写成存活状态（说话、行动）→ severity=critical\n"
+                        f"2. status=missing 的角色是否直接出场 → severity=high\n"
+                        f"3. 其他设定矛盾\n"
+                        f"返回 JSON: {{\"issues\": [{{\"type\": \"...\", \"severity\": \"...\", "
+                        f"\"location\": \"...\", \"character\": \"...\", "
+                        f"\"description\": \"...\", \"suggestion\": \"...\"}}]}}"
                     ),
                     temperature=0.2,
                     max_tokens=1024,

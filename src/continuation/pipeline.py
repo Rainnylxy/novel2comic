@@ -147,6 +147,18 @@ class ContinuationPipeline:
         # 6. 初始化 Agent
         self._init_agents()
 
+    def _get_character_statuses(self) -> dict:
+        """从 KG 提取所有已知角色的状态映射。
+
+        Returns:
+            {name: status} — status 可能是 active/dead/deceased/missing/suspended
+        """
+        graph = self._ctx.novel.story_graph if self._ctx.novel else None
+        if not graph:
+            return {}
+        persons = self._kg.get_all_persons(graph)
+        return {p.name: p.status for p in persons if p.status and p.status != "active"}
+
     def _init_agents(self):
         """初始化 4 个 Agent。"""
         self.architect = PlotArchitect(self._ctx, self._services, self._llm)
@@ -176,6 +188,7 @@ class ContinuationPipeline:
             character_profiles=self._character_profiles,
             last_chapter=self._chapter,
             user_instruction=instruction,
+            character_statuses=self._get_character_statuses(),
         )
 
         architect_result_raw = await self.architect.run(
@@ -195,6 +208,7 @@ class ContinuationPipeline:
             style_profile=self._style_profile,
             previous_chapter_ending=self._previous_chapter_ending,
             character_profiles=self._character_profiles,
+            character_statuses=self._get_character_statuses(),
         )
 
         draft_fragments = []
