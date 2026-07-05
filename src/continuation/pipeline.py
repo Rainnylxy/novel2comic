@@ -55,6 +55,9 @@ class ContinuationPipeline:
         self._chapter: int = 0
         self._fragment_count: int = 0
 
+        # 角色状态验证标记：已验证过的角色不再重复验证
+        self._status_verified: set = set()
+
         # 缓存数据
         self._style_profile = None
         self._character_profiles: dict = {}
@@ -149,14 +152,10 @@ class ContinuationPipeline:
         self._init_agents()
 
     def _get_character_statuses(self) -> dict:
-        """获取角色状态映射。
+        """获取角色状态映射（KG baseline + 已验证角色的覆盖值）。
 
-        策略:
-          1. 从 KG 获取 baseline（快速，但 LLM 一次抽取可能有误差）
-          2. 对 importance >= 6 的角色:
-             a. 规则定位: 正则扫描原文找到该角色最后出场的章节（零 LLM）
-             b. LLM 分析: 提取最后几章的出场场景，让 LLM 现场判断状态
-          3. LLM 分析结果覆盖 KG 缓存
+        不做主动验证——验证由 _verify_characters_in_text() 按需触发。
+        只返回 non-active 状态（active 是默认，不需要约束提示）。
 
         Returns:
             {name: status}
@@ -164,57 +163,74 @@ class ContinuationPipeline:
         graph = self._ctx.novel.story_graph if self._ctx.novel else None
         if not graph:
             return {}
-
-        # Layer 1: KG baseline
         persons = self._kg.get_all_persons(graph)
-        kg_statuses = {p.name: p.status for p in persons if p.status}
+        return {p.name: p.status for p in persons
+                if p.status and p.status != "active"}
 
-        # Layer 2: 对重要角色用 LLM 现场分析（规则定位 + LLM 判断）
-        important = [p for p in persons if p.importance >= 6]
-        if not important:
-            return {n: s for n, s in kg_statuses.items() if s and s != "active"}
+    def _verify_characters_in_text(self, text: str):
+        """按需验证：提取文本中提到的角色，对其做现场状态验证。
+
+        只有尚未验证过的角色才会触发规则定位 + LLM 分析。
+        验证后加入 _status_verified 集合，后续不再重复。
+
+        调用时机:
+          - Plot Architect 生成大纲后（验证大纲中涉及的角色）
+          - 用户 inject 指令后（验证指令中提到的角色）
+
+        Args:
+            text: 大纲文本或用户指令文本（从中提取角色名）
+        """
+        graph = self._ctx.novel.story_graph if self._ctx.novel else None
+        if not graph:
+            return
+
+        # 找出文本中提到的、尚未验证的角色名
+        persons = self._kg.get_all_persons(graph)
+        # 按名字长度降序排列，避免"江停"匹配到"江停的前队友"中的子串问题
+        mentioned = []
+        for p in sorted(persons, key=lambda x: -len(x.name)):
+            if p.name in text and p.name not in self._status_verified:
+                mentioned.append(p)
+
+        if not mentioned:
+            return
 
         novel_text = self._get_novel_text()
         if not novel_text:
-            return {n: s for n, s in kg_statuses.items() if s and s != "active"}
+            return
 
-        # 规则：按章节切分原文（零 LLM）
         chapters = self._split_novel_by_chapter(novel_text)
         if not chapters:
-            return {n: s for n, s in kg_statuses.items() if s and s != "active"}
+            return
 
-        for person in important:
+        for person in mentioned:
             name = person.name
 
-            # 规则：定位角色出场的章节（纯字符串匹配，零 LLM）
+            # 规则：定位该角色最后出场的章节
             appeared = self._find_chapters_by_name(name, chapters)
             if not appeared:
+                self._status_verified.add(name)  # 未找到也标记，避免反复扫
                 continue
 
-            # 取最后 3 章出场的文本
+            # 取最后 3 章的文本 + 角色名周围上下文
             last_chapters = sorted(appeared)[-3:]
-            last_text = "\n".join(
-                chapters.get(ch, "") for ch in last_chapters
-            )
-
-            # 规则：提取角色名周围的上下文段落（零 LLM）
+            last_text = "\n".join(chapters.get(ch, "") for ch in last_chapters)
             context = self._extract_name_context(name, last_text)
 
-            # LLM：基于原文场景分析角色当前状态
+            # LLM 现场分析
             resolved = self._llm_resolve_status(name, context, last_chapters[-1])
 
+            # 标记已验证
+            self._status_verified.add(name)
+
             if resolved:
-                old = kg_statuses.get(name, "active")
+                old = person.status
                 if resolved != old:
                     print(
                         f"  [KG Fix] {name}: {old} → {resolved} "
                         f"(章节 {last_chapters[-1]})"
                     )
-                kg_statuses[name] = resolved
-                person._status = resolved  # 修正 KG
-
-        # 只返回 non-active
-        return {n: s for n, s in kg_statuses.items() if s and s != "active"}
+                person._status = resolved  # 直接修正 KG
 
     def _llm_resolve_status(self, name: str, context: str,
                             last_chapter: int) -> str:
@@ -411,6 +427,9 @@ class ContinuationPipeline:
 
         # 解析 Plot Architect 的输出（可能是 ReAct 的自然文本终止）
         outline = self._parse_outline(architect_result_raw)
+        # 按需验证：大纲中涉及的角色做现场状态校验
+        outline_text = json.dumps(outline, ensure_ascii=False)
+        self._verify_characters_in_text(outline_text)
         yield PipelineEvent("outline", outline)
 
         # —— 阶段 2: 写作 ——
@@ -472,6 +491,8 @@ class ContinuationPipeline:
         Args:
             instruction: 用户自然语言指令
         """
+        # 按需验证：用户指令中可能提到新角色
+        self._verify_characters_in_text(instruction)
         if self.writer:
             await self.writer.inject(instruction)
 
