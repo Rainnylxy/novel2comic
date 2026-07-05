@@ -12,6 +12,7 @@
 
 import asyncio
 import json
+import re
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
 from .fragment import PipelineEvent, StoryFragment
@@ -19,7 +20,6 @@ from .plot_architect import PlotArchitect
 from .chapter_writer import ChapterWriter
 from .consistency_reviewer import ConsistencyReviewer
 from .revision_editor import RevisionEditor
-from .character_status_resolver import CharacterStatusResolver
 
 if TYPE_CHECKING:
     from ..context import GlobalContext, ServiceRegistry
@@ -148,14 +148,36 @@ class ContinuationPipeline:
         # 6. 初始化 Agent
         self._init_agents()
 
+    # ── 规则：死亡关键词 ──
+    _DEATH_PATTERNS = [
+        (re.compile(r'(?:已经|已经)?死了|死去|身亡|丧命|毙命|遇难|殉职|牺牲'), "dead"),
+        (re.compile(r'停止[了]?呼吸|没有[了]?呼吸|没了气息|断[了]?气'), "dead"),
+        (re.compile(r'确认死亡|当场死亡|抢救无效|宣告死亡'), "dead"),
+        (re.compile(r'尸体|遗体|遗容|遗物.{0,10}' + r'(?:被|已|已经)'), "dead"),
+        (re.compile(r'杀[死害][了]?' + r'(?:他|她|它|其)'), "dead"),
+        (re.compile(r'(?:他|她|其)被.{0,5}杀[死害]'), "dead"),
+    ]
+
+    _ARREST_PATTERNS = [
+        (re.compile(r'被[逮抓]捕|被[押拘]走|被关[押进]|入狱|锒铛入狱'), "arrested"),
+        (re.compile(r'带[上走].{0,5}手铐|戴[上了].{0,5}手铐'), "arrested"),
+    ]
+
+    _MISSING_PATTERNS = [
+        (re.compile(r'下落不明|不知所踪|音讯全无|人间蒸发|杳无音信'), "missing"),
+        (re.compile(r'失踪|失联|找不到.{0,5}' + r'(?:他|她|其)'), "missing"),
+    ]
+
     def _get_character_statuses(self) -> dict:
         """获取角色状态映射。
 
-        两层策略:
-          1. 从 KG 获取 baseline（快速但有误差）
-          2. 对 importance >= 6 的关键角色，用 CharacterStatusResolver
-             回到原文现场分析状态（准确性更高）
-          3. Resolver 结果优先于 KG 缓存
+        策略:
+          1. 从 KG 获取 baseline
+          2. 对 importance >= 6 的角色，用规则在原文中检测真实状态
+             - 正则定位角色出场的章节（纯文本匹配，不需要 KG 索引）
+             - 提取最后几章中该角色出现的段落
+             - 用死亡/被捕/失踪关键词规则判断状态
+          3. 规则检测到的状态覆盖 KG 缓存
 
         Returns:
             {name: status}
@@ -168,31 +190,51 @@ class ContinuationPipeline:
         persons = self._kg.get_all_persons(graph)
         kg_statuses = {p.name: p.status for p in persons if p.status}
 
-        # Layer 2: Progressive resolution for important characters
+        # Layer 2: 规则检测 — 对重要角色回到原文验证
         important = [p for p in persons if p.importance >= 6]
-        if important:
-            novel_text = self._get_novel_text()
-            if novel_text:
-                resolver = CharacterStatusResolver(self._llm)
-                for person in important:
-                    try:
-                        resolved = resolver.resolve(
-                            person.name, novel_text, graph,
-                        )
-                        if resolved.get("confidence") in ("high", "medium"):
-                            new_status = resolved.get("status", "")
-                            old_status = kg_statuses.get(person.name, "")
-                            if new_status and new_status != old_status:
-                                print(
-                                    f"  [StatusResolver] {person.name}: "
-                                    f"KG={old_status} → Resolved={new_status} "
-                                    f"({resolved.get('confidence')})"
-                                )
-                            kg_statuses[person.name] = new_status
-                    except Exception:
-                        pass  # 单个角色解析失败不影响整体
+        if not important:
+            return {n: s for n, s in kg_statuses.items() if s and s != "active"}
 
-        # 只返回 non-active 的状态（active 是默认，不需要约束）
+        novel_text = self._get_novel_text()
+        if not novel_text:
+            return {n: s for n, s in kg_statuses.items() if s and s != "active"}
+
+        # 按章节切分原文
+        chapters = self._split_novel_by_chapter(novel_text)
+        if not chapters:
+            return {n: s for n, s in kg_statuses.items() if s and s != "active"}
+
+        for person in important:
+            name = person.name
+            # 规则 1: 找到该角色最后出现的几章
+            appeared = self._find_chapters_by_name(name, chapters)
+            if not appeared:
+                continue
+
+            # 取最后 3 章出场的文本
+            last_chapters = sorted(appeared)[-3:]
+            last_text = "\n".join(
+                chapters.get(ch, "") for ch in last_chapters
+            )
+
+            # 规则 2: 提取角色周围的上下文段落
+            context = self._extract_name_context(name, last_text)
+
+            # 规则 3: 用关键词判断状态
+            detected = self._detect_status_by_rules(name, context)
+
+            if detected:
+                old = kg_statuses.get(name, "active")
+                if detected != old:
+                    print(
+                        f"  [KG Fix] {name}: {old} → {detected} "
+                        f"(章节 {last_chapters[-1]})"
+                    )
+                kg_statuses[name] = detected
+                # 同时修正 KG 中的 person 节点
+                person._status = detected
+
+        # 只返回 non-active
         return {n: s for n, s in kg_statuses.items() if s and s != "active"}
 
     def _get_novel_text(self) -> str:
@@ -204,6 +246,146 @@ class ContinuationPipeline:
             except Exception:
                 pass
         return ""
+
+    @staticmethod
+    def _split_novel_by_chapter(text: str) -> dict:
+        """按章节切分小说。
+
+        Returns:
+            {chapter_number: chapter_text}
+        """
+        import re
+        pattern = re.compile(r'(第[零一二三四五六七八九十百千\d]+章[^\n]*)')
+        parts = pattern.split(text)
+
+        chapters = {}
+        current_ch = 0
+        current_text = []
+
+        for part in parts:
+            m = pattern.match(part)
+            if m:
+                if current_ch > 0 and current_text:
+                    chapters[current_ch] = "".join(current_text)
+                current_ch = ContinuationPipeline._parse_chapter_number(m.group(1))
+                current_text = [part]
+            else:
+                current_text.append(part)
+
+        if current_ch > 0 and current_text:
+            chapters[current_ch] = "".join(current_text)
+
+        return chapters
+
+    @staticmethod
+    def _find_chapters_by_name(name: str, chapters: dict) -> list[int]:
+        """规则定位：角色在哪些章节出场（纯字符串匹配）。
+
+        Args:
+            name: 角色名
+            chapters: {ch_num: text}
+
+        Returns:
+            章节号列表
+        """
+        appeared = []
+        for ch_num in sorted(chapters.keys()):
+            if name in chapters[ch_num]:
+                appeared.append(ch_num)
+        return appeared
+
+    @staticmethod
+    def _extract_name_context(name: str, text: str,
+                              window: int = 300) -> str:
+        """提取角色名周围上下文段落。
+
+        在文本中找到角色名每次出现的位置，提取前后各 window 字的上下文。
+        取最后 5 处出现（最接近结局的）。
+
+        Returns:
+            拼接后的上下文字符串
+        """
+        contexts = []
+        idx = 0
+        while True:
+            idx = text.find(name, idx)
+            if idx == -1:
+                break
+            start = max(0, idx - window)
+            end = min(len(text), idx + window)
+            ctx = text[start:end].strip()
+            if len(ctx) >= 20:
+                contexts.append(ctx)
+            idx += len(name)
+
+        # 取最后 5 处
+        return "\n---\n".join(contexts[-5:]) if contexts else text[-2000:]
+
+    @classmethod
+    def _detect_status_by_rules(cls, name: str, context: str) -> str:
+        """用规则关键词判断角色状态。
+
+        优先级: dead > arrested > missing
+        只在角色名附近（前后 50 字）出现关键词时才触发，
+        避免把"他杀了别人"误判为该角色死亡。
+
+        Returns:
+            检测到的 status，或空字符串（未检测到）
+        """
+        # 提取所有出现位置的附近文本（更精确）
+        nearby_contexts = []
+        idx = 0
+        while True:
+            idx = context.find(name, idx)
+            if idx == -1:
+                break
+            start = max(0, idx - 80)
+            end = min(len(context), idx + 120)
+            nearby_contexts.append(context[start:end])
+            idx += len(name)
+
+        nearby_text = " ".join(nearby_contexts) if nearby_contexts else context
+
+        # 死亡检测
+        for pattern, status in cls._DEATH_PATTERNS:
+            matches = pattern.findall(nearby_text)
+            if matches:
+                return status
+
+        # 被捕检测
+        for pattern, status in cls._ARREST_PATTERNS:
+            if pattern.search(nearby_text):
+                return status
+
+        # 失踪检测
+        for pattern, status in cls._MISSING_PATTERNS:
+            if pattern.search(nearby_text):
+                return status
+
+        return ""
+
+
+    @staticmethod
+    def _parse_chapter_number(title: str) -> int:
+        """从 '第X章' 中解析章节号。"""
+        m = re.search(r'第\s*(\d+)\s*章', title)
+        if m:
+            return int(m.group(1))
+        cn = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
+              "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+              "十": 10, "百": 100, "千": 1000}
+        m = re.search(r'第([零一二三四五六七八九十百千]+)章', title)
+        if m:
+            s = m.group(1)
+            result = 0
+            unit = 1
+            for ch in reversed(s):
+                if ch in ("十", "百", "千"):
+                    unit = cn[ch]
+                else:
+                    result += cn.get(ch, 0) * unit
+            return result if result > 0 else unit
+        return 0
 
     def _init_agents(self):
         """初始化 4 个 Agent。"""
