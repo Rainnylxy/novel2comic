@@ -359,6 +359,8 @@
 </div>
 
 <script>
+  // API 基础地址 —— 由 run_frontend 启动时动态注入
+  var API_BASE = window.API_BASE || 'http://localhost:8000';
 (function () {
   'use strict';
 
@@ -565,7 +567,7 @@
     abortController = new AbortController();
 
     try {
-      var resp = await fetch('/api/write/start', {
+      var resp = await fetch(API_BASE + '/api/write/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -631,7 +633,7 @@
     setStatus('处理指令中...', 'active');
 
     try {
-      var resp = await fetch('/api/write/inject', {
+      var resp = await fetch(API_BASE + '/api/write/inject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instruction: instruction })
@@ -658,7 +660,7 @@
   // ============================================================
   async function pollState() {
     try {
-      var resp = await fetch('/api/write/state');
+      var resp = await fetch(API_BASE + '/api/write/state');
       if (!resp.ok) return;
       var state = await resp.json();
       if (state.phase) {
