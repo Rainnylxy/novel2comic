@@ -148,36 +148,15 @@ class ContinuationPipeline:
         # 6. 初始化 Agent
         self._init_agents()
 
-    # ── 规则：死亡关键词 ──
-    _DEATH_PATTERNS = [
-        (re.compile(r'(?:已经|已经)?死了|死去|身亡|丧命|毙命|遇难|殉职|牺牲'), "dead"),
-        (re.compile(r'停止[了]?呼吸|没有[了]?呼吸|没了气息|断[了]?气'), "dead"),
-        (re.compile(r'确认死亡|当场死亡|抢救无效|宣告死亡'), "dead"),
-        (re.compile(r'尸体|遗体|遗容|遗物.{0,10}' + r'(?:被|已|已经)'), "dead"),
-        (re.compile(r'杀[死害][了]?' + r'(?:他|她|它|其)'), "dead"),
-        (re.compile(r'(?:他|她|其)被.{0,5}杀[死害]'), "dead"),
-    ]
-
-    _ARREST_PATTERNS = [
-        (re.compile(r'被[逮抓]捕|被[押拘]走|被关[押进]|入狱|锒铛入狱'), "arrested"),
-        (re.compile(r'带[上走].{0,5}手铐|戴[上了].{0,5}手铐'), "arrested"),
-    ]
-
-    _MISSING_PATTERNS = [
-        (re.compile(r'下落不明|不知所踪|音讯全无|人间蒸发|杳无音信'), "missing"),
-        (re.compile(r'失踪|失联|找不到.{0,5}' + r'(?:他|她|其)'), "missing"),
-    ]
-
     def _get_character_statuses(self) -> dict:
         """获取角色状态映射。
 
         策略:
-          1. 从 KG 获取 baseline
-          2. 对 importance >= 6 的角色，用规则在原文中检测真实状态
-             - 正则定位角色出场的章节（纯文本匹配，不需要 KG 索引）
-             - 提取最后几章中该角色出现的段落
-             - 用死亡/被捕/失踪关键词规则判断状态
-          3. 规则检测到的状态覆盖 KG 缓存
+          1. 从 KG 获取 baseline（快速，但 LLM 一次抽取可能有误差）
+          2. 对 importance >= 6 的角色:
+             a. 规则定位: 正则扫描原文找到该角色最后出场的章节（零 LLM）
+             b. LLM 分析: 提取最后几章的出场场景，让 LLM 现场判断状态
+          3. LLM 分析结果覆盖 KG 缓存
 
         Returns:
             {name: status}
@@ -190,7 +169,7 @@ class ContinuationPipeline:
         persons = self._kg.get_all_persons(graph)
         kg_statuses = {p.name: p.status for p in persons if p.status}
 
-        # Layer 2: 规则检测 — 对重要角色回到原文验证
+        # Layer 2: 对重要角色用 LLM 现场分析（规则定位 + LLM 判断）
         important = [p for p in persons if p.importance >= 6]
         if not important:
             return {n: s for n, s in kg_statuses.items() if s and s != "active"}
@@ -199,14 +178,15 @@ class ContinuationPipeline:
         if not novel_text:
             return {n: s for n, s in kg_statuses.items() if s and s != "active"}
 
-        # 按章节切分原文
+        # 规则：按章节切分原文（零 LLM）
         chapters = self._split_novel_by_chapter(novel_text)
         if not chapters:
             return {n: s for n, s in kg_statuses.items() if s and s != "active"}
 
         for person in important:
             name = person.name
-            # 规则 1: 找到该角色最后出现的几章
+
+            # 规则：定位角色出场的章节（纯字符串匹配，零 LLM）
             appeared = self._find_chapters_by_name(name, chapters)
             if not appeared:
                 continue
@@ -217,25 +197,75 @@ class ContinuationPipeline:
                 chapters.get(ch, "") for ch in last_chapters
             )
 
-            # 规则 2: 提取角色周围的上下文段落
+            # 规则：提取角色名周围的上下文段落（零 LLM）
             context = self._extract_name_context(name, last_text)
 
-            # 规则 3: 用关键词判断状态
-            detected = self._detect_status_by_rules(name, context)
+            # LLM：基于原文场景分析角色当前状态
+            resolved = self._llm_resolve_status(name, context, last_chapters[-1])
 
-            if detected:
+            if resolved:
                 old = kg_statuses.get(name, "active")
-                if detected != old:
+                if resolved != old:
                     print(
-                        f"  [KG Fix] {name}: {old} → {detected} "
+                        f"  [KG Fix] {name}: {old} → {resolved} "
                         f"(章节 {last_chapters[-1]})"
                     )
-                kg_statuses[name] = detected
-                # 同时修正 KG 中的 person 节点
-                person._status = detected
+                kg_statuses[name] = resolved
+                person._status = resolved  # 修正 KG
 
         # 只返回 non-active
         return {n: s for n, s in kg_statuses.items() if s and s != "active"}
+
+    def _llm_resolve_status(self, name: str, context: str,
+                            last_chapter: int) -> str:
+        """LLM 分析角色当前状态。
+
+        基于该角色最后几次出场的原文场景，判断其当前状态。
+        只调用 1 次 LLM，传入已提取好（规则定位）的场景文本。
+
+        Args:
+            name: 角色名
+            context: 该角色最后几次出场的上下文文本（已由规则提取）
+            last_chapter: 最后出场章节
+
+        Returns:
+            状态字符串（dead/active/missing/arrested），或空字符串（无法确定）
+        """
+        if not context or len(context) < 20:
+            return ""
+
+        prompt = f"""你是小说分析员。根据角色最后几次出场的原文片段，判断该角色当前状态。
+
+角色: {name}
+最后出场章节: 第{last_chapter}章
+
+原文场景:
+{context[:3000]}
+
+该角色当前是:
+- dead: 原文明确描写了死亡（如"停止了呼吸""确认死亡""尸体"等）
+- arrested: 被逮捕/关押
+- missing: 失踪/下落不明
+- active: 还活着，正常活动
+
+返回 JSON: {{"status": "dead|active|missing|arrested", "evidence": "原文关键句（证明该状态的一句原文引用）"}}
+只返回 JSON。"""
+
+        try:
+            result = self._llm.chat_json(
+                system_prompt="你是专业小说分析员。只返回 JSON，不返回其他内容。",
+                user_prompt=prompt,
+                temperature=0.2,
+                max_tokens=512,
+            )
+            if isinstance(result, dict):
+                status = result.get("status", "")
+                if status in ("dead", "arrested", "missing", "active"):
+                    return status
+        except Exception:
+            pass
+
+        return ""
 
     def _get_novel_text(self) -> str:
         """获取小说全文文本。"""
@@ -320,50 +350,6 @@ class ContinuationPipeline:
 
         # 取最后 5 处
         return "\n---\n".join(contexts[-5:]) if contexts else text[-2000:]
-
-    @classmethod
-    def _detect_status_by_rules(cls, name: str, context: str) -> str:
-        """用规则关键词判断角色状态。
-
-        优先级: dead > arrested > missing
-        只在角色名附近（前后 50 字）出现关键词时才触发，
-        避免把"他杀了别人"误判为该角色死亡。
-
-        Returns:
-            检测到的 status，或空字符串（未检测到）
-        """
-        # 提取所有出现位置的附近文本（更精确）
-        nearby_contexts = []
-        idx = 0
-        while True:
-            idx = context.find(name, idx)
-            if idx == -1:
-                break
-            start = max(0, idx - 80)
-            end = min(len(context), idx + 120)
-            nearby_contexts.append(context[start:end])
-            idx += len(name)
-
-        nearby_text = " ".join(nearby_contexts) if nearby_contexts else context
-
-        # 死亡检测
-        for pattern, status in cls._DEATH_PATTERNS:
-            matches = pattern.findall(nearby_text)
-            if matches:
-                return status
-
-        # 被捕检测
-        for pattern, status in cls._ARREST_PATTERNS:
-            if pattern.search(nearby_text):
-                return status
-
-        # 失踪检测
-        for pattern, status in cls._MISSING_PATTERNS:
-            if pattern.search(nearby_text):
-                return status
-
-        return ""
-
 
     @staticmethod
     def _parse_chapter_number(title: str) -> int:
