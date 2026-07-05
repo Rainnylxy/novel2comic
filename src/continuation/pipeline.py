@@ -19,6 +19,7 @@ from .plot_architect import PlotArchitect
 from .chapter_writer import ChapterWriter
 from .consistency_reviewer import ConsistencyReviewer
 from .revision_editor import RevisionEditor
+from .character_status_resolver import CharacterStatusResolver
 
 if TYPE_CHECKING:
     from ..context import GlobalContext, ServiceRegistry
@@ -148,16 +149,61 @@ class ContinuationPipeline:
         self._init_agents()
 
     def _get_character_statuses(self) -> dict:
-        """从 KG 提取所有已知角色的状态映射。
+        """获取角色状态映射。
+
+        两层策略:
+          1. 从 KG 获取 baseline（快速但有误差）
+          2. 对 importance >= 6 的关键角色，用 CharacterStatusResolver
+             回到原文现场分析状态（准确性更高）
+          3. Resolver 结果优先于 KG 缓存
 
         Returns:
-            {name: status} — status 可能是 active/dead/deceased/missing/suspended
+            {name: status}
         """
         graph = self._ctx.novel.story_graph if self._ctx.novel else None
         if not graph:
             return {}
+
+        # Layer 1: KG baseline
         persons = self._kg.get_all_persons(graph)
-        return {p.name: p.status for p in persons if p.status and p.status != "active"}
+        kg_statuses = {p.name: p.status for p in persons if p.status}
+
+        # Layer 2: Progressive resolution for important characters
+        important = [p for p in persons if p.importance >= 6]
+        if important:
+            novel_text = self._get_novel_text()
+            if novel_text:
+                resolver = CharacterStatusResolver(self._llm)
+                for person in important:
+                    try:
+                        resolved = resolver.resolve(
+                            person.name, novel_text, graph,
+                        )
+                        if resolved.get("confidence") in ("high", "medium"):
+                            new_status = resolved.get("status", "")
+                            old_status = kg_statuses.get(person.name, "")
+                            if new_status and new_status != old_status:
+                                print(
+                                    f"  [StatusResolver] {person.name}: "
+                                    f"KG={old_status} → Resolved={new_status} "
+                                    f"({resolved.get('confidence')})"
+                                )
+                            kg_statuses[person.name] = new_status
+                    except Exception:
+                        pass  # 单个角色解析失败不影响整体
+
+        # 只返回 non-active 的状态（active 是默认，不需要约束）
+        return {n: s for n, s in kg_statuses.items() if s and s != "active"}
+
+    def _get_novel_text(self) -> str:
+        """获取小说全文文本。"""
+        if self._ctx.novel and self._ctx.novel.file_path:
+            try:
+                from ..services.project_service import ProjectService as PS
+                return PS.read_text_file(self._ctx.novel.file_path)
+            except Exception:
+                pass
+        return ""
 
     def _init_agents(self):
         """初始化 4 个 Agent。"""
