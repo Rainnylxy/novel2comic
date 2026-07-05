@@ -13,9 +13,8 @@
 """
 
 import re
-import math
 from collections import Counter
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from .author_style_profile import (
     AuthorStyleProfile,
@@ -268,10 +267,10 @@ class AuthorStyleDistiller:
             if isinstance(result, dict):
                 return NarrativePatternProfile(
                     pov_frequency=result.get("pov_frequency", ""),
-                    inner_monologue_density=float(result.get("inner_monologue_density", 0)),
+                    inner_monologue_density=max(0.0, min(1.0, float(result.get("inner_monologue_density", 0)))),
                     cliffhanger_style=result.get("cliffhanger_style", ""),
                     scene_transition_style=result.get("scene_transition_style", ""),
-                    description_density=float(result.get("description_density", 0)),
+                    description_density=max(0.0, min(1.0, float(result.get("description_density", 0)))),
                 )
         except Exception:
             pass
