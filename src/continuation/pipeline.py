@@ -12,6 +12,7 @@
 
 import asyncio
 import json
+import os
 import re
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
@@ -98,37 +99,46 @@ class ContinuationPipeline:
         text = PS.read_text_file(novel_path)
         base_name = novel_path.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
         chapters = parse_novel_chapters(text, base_name)
-
-        # 2. 创建 Novel → 提取 KG
-        project_dir = self._services.project.create_project_dir(base_name)
-        self._ctx.novel = Novel(
-            title=base_name,
-            file_path=novel_path,
-            chapters=chapters,
-            output_dir=project_dir,
-        )
-
-        self._ctx.novel.story_graph = self._services.kg.extract_incremental(
-            chapters,
-            batch_size=int(__import__('os').getenv("KG_BATCH_SIZE", "10")),
-        )
-        self._services.project.save_novel(self._ctx.novel)
-
-        graph = self._ctx.novel.story_graph
         self._chapter = len(chapters)
 
-        # 3. 蒸馏文风 Profile
+        # 2. KG: 优先读缓存，没有才提取
+        cached = self._find_cached_project(base_name, len(chapters))
+        if cached:
+            self._ctx.novel = cached
+            print(f"[KG] 从缓存加载：{cached.story_graph.total_node_count} 个节点, "
+                  f"{cached.story_graph.total_edge_count} 条边")
+        else:
+            project_dir = self._services.project.create_project_dir(base_name)
+            self._ctx.novel = Novel(
+                title=base_name,
+                file_path=os.path.abspath(novel_path) if hasattr(os, 'path') else novel_path,
+                chapters=chapters,
+                output_dir=project_dir,
+            )
+            print(f"[KG] 正在逐章提取知识图谱（{len(chapters)} 章）...")
+            self._ctx.novel.story_graph = self._services.kg.extract_incremental(
+                chapters,
+                batch_size=int(__import__('os').getenv("KG_BATCH_SIZE", "10")),
+            )
+            self._services.project.save_novel(self._ctx.novel)
+            graph = self._ctx.novel.story_graph
+            print(f"[KG] 完成：{graph.total_node_count} 个节点, "
+                  f"{graph.total_edge_count} 条边")
+
+        graph = self._ctx.novel.story_graph
+
+        # 3. 蒸馏文风 Profile（优先读缓存）
         distiller = AuthorStyleDistiller(self._llm)
-        # 检查是否有缓存的 style profile
-        cached_style = self._ctx.novel.output_dir and self._load_cached_style(
-            self._ctx.novel.output_dir
-        )
+        project_dir = self._ctx.novel.output_dir or ""
+        cached_style = project_dir and self._load_cached_style(project_dir)
         if cached_style:
             self._style_profile = cached_style
+            print(f"[Style] 从缓存加载文风 Profile")
         else:
             self._style_profile = distiller.distill(text)
-            if self._ctx.novel.output_dir:
-                self._save_cached_style(self._ctx.novel.output_dir, self._style_profile)
+            if project_dir:
+                self._save_cached_style(project_dir, self._style_profile)
+            print(f"[Style] 文风蒸馏完成")
 
         # 4. 蒸馏主要角色 Profile（importance >= 6）
         char_distiller = CharacterDistiller(self._llm, self._kg)
@@ -548,6 +558,43 @@ class ContinuationPipeline:
         except json.JSONDecodeError:
             pass
         return {"revised_fragments": [], "changes": [], "status": "parse_failed"}
+
+    def _find_cached_project(self, base_name: str, expected_chapters: int):
+        """在 projects 目录查找已缓存的 novel.json。
+
+        匹配条件: 目录名以 base_name 开头 + novel.json 存在 + 章节数匹配。
+
+        Returns:
+            Novel 对象或 None
+        """
+        from ..models import Novel
+        projects_dir = getattr(self._services.project, '_projects_dir', '')
+        if not projects_dir or not os.path.isdir(projects_dir):
+            return None
+
+        candidates = sorted(
+            [d for d in os.listdir(projects_dir)
+             if d.startswith(base_name)],
+            reverse=True,
+        )
+        for dir_name in candidates:
+            novel_path = os.path.join(projects_dir, dir_name, "novel.json")
+            if not os.path.exists(novel_path):
+                continue
+            try:
+                with open(novel_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                saved_chapters = len(data.get("chapters", []))
+                if saved_chapters != expected_chapters:
+                    continue
+                novel = Novel.from_dict(data)
+                novel.file_path = ""
+                novel.output_dir = os.path.join(projects_dir, dir_name)
+                if novel.story_graph and novel.story_graph.total_node_count > 0:
+                    return novel
+            except Exception:
+                continue
+        return None
 
     def _load_cached_style(self, project_dir: str) -> Optional[object]:
         """从项目目录加载缓存的文风 Profile。"""
