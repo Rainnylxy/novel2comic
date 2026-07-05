@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>📖 互动小说引擎</title>
+<title>续写引擎</title>
 <style>
   :root {
     --bg: #0d1117;
@@ -14,16 +14,14 @@
     --text-dim: #8b949e;
     --accent: #d4a853;
     --accent-glow: #f0c060;
-    --danger: #f85149;
-    --green: #3fb950;
     --blue: #58a6ff;
     --purple: #bc8cff;
+    --green: #3fb950;
+    --danger: #f85149;
   }
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
   body {
-    font-family: Georgia, 'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif;
+    font-family: Georgia, 'Noto Serif SC', 'Source Han Serif SC', serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
@@ -39,19 +37,16 @@
     min-height: 100vh;
     padding: 2rem;
   }
-
   #start-screen h1 {
     font-size: 2.5rem;
     color: var(--accent);
     margin-bottom: 0.5rem;
-    text-shadow: 0 0 20px rgba(212,168,83,0.3);
+    text-shadow: 0 0 20px rgba(212, 168, 83, 0.3);
   }
-
   #start-screen .subtitle {
     color: var(--text-dim);
     margin-bottom: 2rem;
   }
-
   #start-form {
     background: var(--bg-panel);
     border: 1px solid var(--border);
@@ -60,15 +55,14 @@
     width: 100%;
     max-width: 480px;
   }
-
   #start-form label {
     display: block;
     color: var(--text-dim);
     font-size: 0.85rem;
     margin: 1rem 0 0.3rem;
   }
-
-  #start-form input {
+  #start-form input,
+  #start-form textarea {
     width: 100%;
     padding: 0.6rem 0.8rem;
     background: var(--bg-input);
@@ -77,13 +71,13 @@
     color: var(--text);
     font-family: inherit;
     font-size: 1rem;
+    resize: vertical;
   }
-
-  #start-form input:focus {
+  #start-form input:focus,
+  #start-form textarea:focus {
     outline: none;
     border-color: var(--accent);
   }
-
   #start-form button {
     width: 100%;
     margin-top: 1.5rem;
@@ -98,642 +92,608 @@
     cursor: pointer;
     transition: background 0.2s;
   }
-
   #start-form button:hover {
     background: var(--accent-glow);
   }
+  #start-form button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 
-  /* ===== 游戏主界面 ===== */
-  #game-screen {
+  /* ===== 阅读视图 ===== */
+  #reader-screen {
     display: none;
-    min-height: 100vh;
-  }
-
-  #game-layout {
-    display: flex;
-    max-width: 1200px;
-    margin: 0 auto;
-    min-height: 100vh;
-  }
-
-  /* 主对话区 */
-  #main-panel {
-    flex: 1;
-    display: flex;
     flex-direction: column;
-    min-width: 0;
-    padding: 1rem;
+    height: 100vh;
   }
 
-  #header {
-    padding: 0.5rem 0 1rem;
+  /* 顶部栏 */
+  #top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 1.2rem;
+    background: var(--bg-panel);
     border-bottom: 1px solid var(--border);
-    margin-bottom: 0.5rem;
+    position: sticky;
+    top: 0;
+    z-index: 10;
   }
-
-  #header .novel-title {
-    font-size: 1.3rem;
+  #top-bar .title {
+    font-size: 1.1rem;
+    font-weight: bold;
     color: var(--accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-
-  #header .scene-info {
+  #top-bar .status {
     font-size: 0.85rem;
     color: var(--text-dim);
-    margin-top: 0.2rem;
+    white-space: nowrap;
+    margin-left: 1rem;
+  }
+  #top-bar .status.active {
+    color: var(--green);
+  }
+  #top-bar .status.error {
+    color: var(--danger);
   }
 
-  /* 对话区 */
-  #dialogue-area {
+  /* Fragment 容器 */
+  #fragment-container {
     flex: 1;
     overflow-y: auto;
-    padding: 0.5rem 0;
+    padding: 1.5rem;
+    max-width: 700px;
+    margin: 0 auto;
+    width: 100%;
     scroll-behavior: smooth;
   }
-
-  #dialogue-area::-webkit-scrollbar {
+  #fragment-container::-webkit-scrollbar {
     width: 6px;
   }
-
-  #dialogue-area::-webkit-scrollbar-thumb {
+  #fragment-container::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 3px;
   }
 
-  /* 消息气泡 */
-  .msg {
-    margin: 0.8rem 0;
-    padding: 0.6rem 1rem;
-    border-left: 3px solid var(--border);
-    border-radius: 0 8px 8px 0;
-    animation: fadeIn 0.3s ease;
+  /* 底部输入栏 */
+  #bottom-bar {
+    padding: 0.8rem 1.2rem;
     background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 0.8rem;
   }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .msg.narrate {
-    border-left-color: var(--text-dim);
-    font-style: italic;
-    color: var(--text-dim);
-    background: transparent;
-    border-left: 2px dashed var(--border);
-  }
-
-  .msg.dialogue .msg-header {
-    font-weight: bold;
-    font-size: 0.9rem;
-    margin-bottom: 0.2rem;
-  }
-
-  .msg.dialogue .msg-body {
-    font-size: 1rem;
-  }
-
-  .msg.user-msg {
-    border-left-color: var(--blue);
-  }
-
-  .msg.user-msg .msg-header {
-    color: var(--blue);
-  }
-
-  /* 抉择面板 */
-  #choice-panel {
-    display: none;
-    margin: 1rem 0;
-    border: 2px solid var(--accent);
-    border-radius: 12px;
-    background: rgba(212,168,83,0.05);
-    padding: 1rem 1.2rem;
-    animation: fadeIn 0.4s ease;
-  }
-
-  #choice-panel .choice-moment {
-    color: var(--accent);
-    font-size: 1rem;
-    font-weight: bold;
-    margin-bottom: 1rem;
-  }
-
-  .choice-btn {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 0.7rem 1rem;
-    margin: 0.4rem 0;
+  #inject-input {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text);
     font-family: inherit;
     font-size: 0.95rem;
-    cursor: pointer;
-    transition: all 0.2s;
   }
-
-  .choice-btn:hover {
-    border-color: var(--accent);
-    background: rgba(212,168,83,0.1);
-    color: var(--accent-glow);
-  }
-
-  /* 输入区 */
-  #input-area {
-    display: flex;
-    gap: 0.5rem;
-    padding: 1rem 0;
-    border-top: 1px solid var(--border);
-  }
-
-  #input-area input {
-    flex: 1;
-    padding: 0.7rem 1rem;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 1rem;
-  }
-
-  #input-area input:focus {
+  #inject-input:focus {
     outline: none;
     border-color: var(--accent);
   }
-
-  #input-area button {
-    padding: 0.7rem 1.5rem;
-    background: var(--accent);
-    color: #0d1117;
+  #inject-btn {
+    padding: 0.6rem 1.2rem;
+    background: var(--blue);
+    color: white;
     border: none;
     border-radius: 8px;
+    cursor: pointer;
     font-family: inherit;
     font-weight: bold;
-    cursor: pointer;
+    transition: opacity 0.2s;
   }
-
-  #input-area button:disabled {
+  #inject-btn:hover {
+    opacity: 0.85;
+  }
+  #inject-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }
 
-  /* 侧栏 */
-  #sidebar {
-    width: 260px;
-    padding: 1.5rem 1rem;
-    border-left: 1px solid var(--border);
-    background: var(--bg-panel);
-    overflow-y: auto;
-  }
+  /* ===== Fragment 样式 ===== */
 
-  #sidebar h3 {
-    color: var(--accent);
-    font-size: 0.95rem;
-    margin: 1.2rem 0 0.6rem;
-    padding-bottom: 0.3rem;
-    border-bottom: 1px solid var(--border);
-  }
-
-  #sidebar h3:first-child {
-    margin-top: 0;
-  }
-
-  .intimacy-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.3rem 0;
-    font-size: 0.9rem;
-  }
-
-  .intimacy-bar {
-    width: 80px;
-    height: 6px;
-    background: var(--bg-input);
-    border-radius: 3px;
-    overflow: hidden;
-  }
-
-  .intimacy-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.5s ease;
-  }
-
-  .flag-item {
-    font-size: 0.85rem;
-    padding: 0.2rem 0;
-    color: var(--text-dim);
-  }
-
-  .flag-item.set {
-    color: var(--green);
-  }
-
-  .ending-hint {
-    font-size: 0.9rem;
-    padding: 0.5rem;
-    background: var(--bg-input);
-    border-radius: 6px;
-    color: var(--accent);
-  }
-
-  /* 响应式 */
-  @media (max-width: 768px) {
-    #game-layout { flex-direction: column; }
-    #sidebar {
-      width: 100%;
-      border-left: none;
-      border-top: 1px solid var(--border);
-      padding: 1rem;
-    }
-  }
-
-  /* 加载指示器 */
-  .typing-indicator {
-    display: none;
+  /* 1. 叙述（旁白）：居中灰色斜体 */
+  .frag-narration {
+    text-align: center;
     color: var(--text-dim);
     font-style: italic;
+    margin: 1rem 0;
     padding: 0.5rem 1rem;
-    animation: blink 1s infinite;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.95rem;
   }
 
-  @keyframes blink {
+  /* 2. 分隔线 */
+  .frag-divider {
+    text-align: center;
+    margin: 1.5rem 0;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+  .frag-divider::before,
+  .frag-divider::after {
+    content: ' ──── ';
+    color: var(--border);
+  }
+
+  /* 3-5. 对话块（dialogue / action / inner_thought 共用容器） */
+  .frag-dialogue-block {
+    margin: 1rem 0;
+  }
+  .frag-dialogue-block.right {
+    text-align: right;
+  }
+  .frag-dialogue-block.left {
+    text-align: left;
+  }
+
+  /* 角色名标签 */
+  .frag-character-label {
+    font-size: 0.8rem;
+    color: var(--blue);
+    margin-bottom: 0.2rem;
+    font-weight: bold;
+  }
+  .frag-dialogue-block.right .frag-character-label {
+    color: var(--purple);
+  }
+
+  /* 3. 对话气泡 */
+  .frag-dialogue-bubble {
+    display: inline-block;
+    max-width: 80%;
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    font-size: 1rem;
+    text-align: left;
+  }
+  .frag-dialogue-block.right .frag-dialogue-bubble {
+    background: #1a2332;
+    border-color: var(--purple);
+  }
+
+  /* 4. 内心独白（虚线边框） */
+  .frag-inner-thought {
+    display: inline-block;
+    max-width: 80%;
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
+    border: 1.5px dashed var(--border);
+    background: transparent;
+    font-style: italic;
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    text-align: left;
+  }
+  .frag-dialogue-block.right .frag-inner-thought {
+    border-color: var(--purple);
+  }
+
+  /* 5. 动作描述 */
+  .frag-action {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-top: 0.15rem;
+  }
+  .frag-action::before {
+    content: '( ';
+  }
+  .frag-action::after {
+    content: ' )';
+  }
+
+  /* 打字机光标动画 */
+  .frag-typing::after {
+    content: ' ▌';
+    animation: blink-cursor 1s step-end infinite;
+    color: var(--accent);
+  }
+  @keyframes blink-cursor {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+    50% { opacity: 0; }
+  }
+
+  /* 入场动画 */
+  @keyframes frag-fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .frag-narration,
+  .frag-divider,
+  .frag-dialogue-block {
+    animation: frag-fade-in 0.3s ease;
   }
 </style>
 </head>
 <body>
 
-<!-- ===== 启动画面 ===== -->
+<!-- ==================== 启动画面 ==================== -->
 <div id="start-screen">
-  <h1>📖 互动小说引擎</h1>
-  <p class="subtitle">进入小说世界，你的选择改变结局</p>
+  <h1>续写引擎</h1>
+  <p class="subtitle">AI 自主续写 · 聊天小说阅读体验</p>
   <form id="start-form">
-    <label>小说文件路径</label>
-    <input type="text" id="f-novel" value="novels/poyun.txt" required>
-
-    <label>起始章节</label>
-    <input type="number" id="f-chapter" value="24" min="1" required>
-
-    <label>你的角色名</label>
-    <input type="text" id="f-user" value="林默" required>
-
-    <label>你的身份</label>
-    <input type="text" id="f-identity" value="新调来的刑警" required>
-
-    <label>NPC 角色 (逗号分隔，留空自动检测)</label>
-    <input type="text" id="f-npcs" value="" placeholder="如: 江停,严峫">
-
-    <button type="submit">🎭 开始游戏</button>
+    <label>小说路径</label>
+    <input id="novel-path" type="text" value="novels/poyun.txt"
+           placeholder="如: novels/poyun.txt" required>
+    <label>初始指令（可选）</label>
+    <textarea id="initial-instruction" rows="2"
+              placeholder="如: 让江停更主动一些"></textarea>
+    <button type="submit" id="start-btn">开始续写</button>
   </form>
 </div>
 
-<!-- ===== 游戏主界面 ===== -->
-<div id="game-screen">
-  <div id="game-layout">
-    <!-- 主对话区 -->
-    <div id="main-panel">
-      <div id="header">
-        <div class="novel-title" id="h-title">📖 加载中...</div>
-        <div class="scene-info" id="h-scene"></div>
-      </div>
+<!-- ==================== 阅读画面 ==================== -->
+<div id="reader-screen">
+  <!-- 顶部栏 -->
+  <div id="top-bar">
+    <span class="title" id="reader-title">续写中...</span>
+    <span class="status" id="status-label">就绪</span>
+  </div>
 
-      <div id="dialogue-area">
-        <div class="typing-indicator" id="typing">⏳ 角色正在思考...</div>
-      </div>
-
-      <div id="choice-panel">
-        <div class="choice-moment" id="choice-title"></div>
-        <div id="choice-buttons"></div>
-      </div>
-
-      <div id="input-area">
-        <input type="text" id="user-input" placeholder="输入你想说的话..." autocomplete="off">
-        <button id="send-btn">发送</button>
-      </div>
+  <!-- fragment 流 -->
+  <div id="fragment-container">
+    <div id="fragment-placeholder" style="text-align:center;color:var(--text-dim);margin-top:2rem;">
+      正在连接服务器...
     </div>
+  </div>
 
-    <!-- 侧栏 -->
-    <div id="sidebar">
-      <h3>📊 亲密度</h3>
-      <div id="intimacy-list"></div>
-
-      <h3>📋 剧情旗标</h3>
-      <div id="flags-list"></div>
-
-      <h3>🎯 结局倾向</h3>
-      <div class="ending-hint" id="ending-hint">暂无数据</div>
-
-      <h3>⏱ 统计</h3>
-      <div id="stats-info" style="font-size:0.85rem;color:var(--text-dim)"></div>
-    </div>
+  <!-- 底部指令栏 -->
+  <div id="bottom-bar">
+    <input id="inject-input" type="text"
+           placeholder="输入指令调整续写方向..."
+           autocomplete="off">
+    <button id="inject-btn" disabled>发送</button>
   </div>
 </div>
 
 <script>
-// ============================================================
-// 配置 (前后端分离: 前端独立部署，连接后端 API)
-// ============================================================
-const API_BASE = window.API_BASE || 'http://localhost:8000';
+(function () {
+  'use strict';
 
-// ============================================================
-// 状态
-// ============================================================
-let sessionId = null;
-let eventSource = null;
-let isWaiting = false;
+  // ============================================================
+  // 状态
+  // ============================================================
+  let abortController = null;
+  let readerRef = null;
+  let fragmentCount = 0;
 
-// 角色颜色映射（从角色名 hash 生成）
-const CHAR_COLORS = {};
+  // DOM 引用
+  const $ = function (id) { return document.getElementById(id); };
+  const startScreen    = $('start-screen');
+  const readerScreen   = $('reader-screen');
+  const readerTitle    = $('reader-title');
+  const statusLabel    = $('status-label');
+  const fragContainer  = $('fragment-container');
+  const injectInput    = $('inject-input');
+  const injectBtn      = $('inject-btn');
+  const startForm      = $('start-form');
+  const startBtn       = $('start-btn');
+  const novelPathInput = $('novel-path');
+  const initInstrInput = $('initial-instruction');
 
-function charColor(name) {
-  if (!CHAR_COLORS[name]) {
-    const colors = ['#58a6ff','#3fb950','#bc8cff','#f0883e','#f85149','#d29922','#79c0ff','#a5d6ff'];
-    let hash = 0;
-    for (let c of name) hash = (hash * 31 + c.charCodeAt(0)) | 0;
-    CHAR_COLORS[name] = colors[Math.abs(hash) % colors.length];
+  // ============================================================
+  // 工具函数
+  // ============================================================
+  function escapeHtml(text) {
+    var d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
   }
-  return CHAR_COLORS[name];
-}
 
-// ============================================================
-// 启动
-// ============================================================
-document.getElementById('start-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const btn = e.target.querySelector('button');
-  btn.disabled = true;
-  btn.textContent = '⏳ 正在加载小说和构建知识图谱...';
-
-  const body = {
-    novel_path: document.getElementById('f-novel').value.trim(),
-    chapter: parseInt(document.getElementById('f-chapter').value) || 1,
-    user_name: document.getElementById('f-user').value.trim() || '林默',
-    user_identity: document.getElementById('f-identity').value.trim() || '新调来的刑警',
-    npcs: document.getElementById('f-npcs').value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
-  };
-
-  try {
-    const resp = await fetch(`${API_BASE}/api/play/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await resp.json();
-    if (data.error) { alert('启动失败: ' + data.error); btn.disabled = false; btn.textContent = '🎭 开始游戏'; return; }
-
-    sessionId = data.session_id;
-    document.getElementById('start-screen').style.display = 'none';
-    document.getElementById('game-screen').style.display = 'block';
-
-    document.getElementById('h-title').textContent = `📖 加载完成`;
-    updateSidebar(data.state);
-    connectSSE();
-  } catch (err) {
-    alert('连接失败: ' + err.message);
-    btn.disabled = false;
-    btn.textContent = '🎭 开始游戏';
+  function setStatus(text, className) {
+    statusLabel.textContent = text;
+    statusLabel.className = 'status' + (className ? ' ' + className : '');
   }
-});
 
-// ============================================================
-// SSE 事件流
-// ============================================================
-function connectSSE() {
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource(`${API_BASE}/api/play/stream?session_id=${sessionId}`);
+  function scrollToBottom() {
+    fragContainer.scrollTop = fragContainer.scrollHeight;
+  }
 
-  eventSource.addEventListener('narrate', (e) => {
-    const data = JSON.parse(e.data);
-    appendMessage('narrate', data.text);
-    hideTyping();
-  });
+  function removeTypingCursor() {
+    var el = fragContainer.querySelector('.frag-typing');
+    if (el) el.classList.remove('frag-typing');
+  }
 
-  eventSource.addEventListener('dialogue', (e) => {
-    const data = JSON.parse(e.data);
-    appendMessage('dialogue', data.text, data.character);
-    hideTyping();
-  });
+  // ============================================================
+  // Fragment 渲染
+  // ============================================================
+  function appendFragment(data) {
+    // 移除上一个 fragment 的打字机光标
+    removeTypingCursor();
 
-  eventSource.addEventListener('choice', (e) => {
-    const data = JSON.parse(e.data);
-    showChoice(data);
-    hideTyping();
-  });
+    var el;
 
-  eventSource.addEventListener('state_update', (e) => {
-    const data = JSON.parse(e.data);
-    updateSidebarFromEvent(data);
-  });
+    switch (data.type) {
+      // ---- 叙述（旁白） ----
+      case 'narration':
+        el = document.createElement('div');
+        el.className = 'frag-narration frag-typing';
+        el.textContent = data.text;
+        break;
 
-  eventSource.addEventListener('user_message', (e) => {
-    const data = JSON.parse(e.data);
-    appendMessage('user_msg', data.text, '你');
-    showTyping();
-  });
+      // ---- 分隔线 ----
+      case 'divider':
+        el = document.createElement('div');
+        el.className = 'frag-divider';
+        el.textContent = data.divider_label || '';
+        break;
 
-  eventSource.addEventListener('error', (e) => {
+      // ---- 对话 / 内心独白 / 动作（共用对话块容器） ----
+      case 'dialogue':
+      case 'inner_thought':
+      case 'action':
+        el = document.createElement('div');
+        el.className = 'frag-dialogue-block frag-typing';
+
+        // 左右交替：偶数序号右，奇数序号左
+        el.classList.add(fragmentCount % 2 === 0 ? 'right' : 'left');
+
+        // 角色名标签（如果有）
+        if (data.character) {
+          var label = document.createElement('div');
+          label.className = 'frag-character-label';
+          label.textContent = data.character;
+          el.appendChild(label);
+        }
+
+        // 根据具体类型渲染内容
+        if (data.type === 'dialogue') {
+          var bubble = document.createElement('div');
+          bubble.className = 'frag-dialogue-bubble';
+          bubble.textContent = data.text;
+          el.appendChild(bubble);
+        } else if (data.type === 'inner_thought') {
+          var thought = document.createElement('div');
+          thought.className = 'frag-inner-thought';
+          thought.textContent = data.text;
+          el.appendChild(thought);
+        } else if (data.type === 'action') {
+          var action = document.createElement('div');
+          action.className = 'frag-action';
+          action.textContent = data.text;
+          el.appendChild(action);
+        }
+        break;
+
+      // ---- 未知类型 ----
+      default:
+        el = document.createElement('div');
+        el.className = 'frag-narration frag-typing';
+        el.textContent = data.text || '';
+        break;
+    }
+
+    fragContainer.appendChild(el);
+    fragmentCount++;
+    scrollToBottom();
+  }
+
+  // ============================================================
+  // SSE 事件处理
+  // ============================================================
+  function handleSSEEvent(eventType, data) {
+    switch (eventType) {
+      case 'phase':
+        var labels = {
+          planning:  '规划中...',
+          writing:   '写作中...',
+          reviewing: '审校中...',
+          revising:  '修订中...'
+        };
+        setStatus(labels[data.phase] || data.phase, 'active');
+        break;
+
+      case 'outline':
+        var title = data.title || ('第' + data.chapter_number + '章');
+        readerTitle.textContent = title + ' · 第' + data.chapter_number + '章';
+        // 插入章节分隔线
+        appendFragment({
+          type: 'divider',
+          divider_label: '第' + data.chapter_number + '章'
+        });
+        break;
+
+      case 'fragment':
+        appendFragment(data);
+        break;
+
+      case 'review':
+        var issues = data.issues || [];
+        setStatus(
+          issues.length > 0
+            ? '审校: ' + issues.length + ' 个问题'
+            : '审校通过',
+          issues.length > 0 ? 'error' : 'active'
+        );
+        break;
+
+      case 'complete':
+        setStatus('续写完成', '');
+        removeTypingCursor();
+        injectBtn.disabled = false;
+        injectInput.disabled = false;
+        break;
+
+      case 'done':
+        setStatus('就绪', '');
+        break;
+
+      case 'error':
+        setStatus('错误: ' + (data.message || '未知错误'), 'error');
+        removeTypingCursor();
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // ============================================================
+  // 启动续写
+  // ============================================================
+  async function startWriting(event) {
+    event.preventDefault();
+
+    var novelPath = novelPathInput.value.trim();
+    if (!novelPath) return;
+
+    var instruction = initInstrInput.value.trim();
+
+    // 切换到阅读视图
+    startScreen.style.display = 'none';
+    readerScreen.style.display = 'flex';
+    readerTitle.textContent = novelPath.split('/').pop();
+    setStatus('规划中...', 'active');
+    fragContainer.innerHTML = '';
+    injectBtn.disabled = true;
+    injectInput.disabled = true;
+    fragmentCount = 0;
+
+    // 发起 SSE 流式请求
+    abortController = new AbortController();
+
     try {
-      const data = JSON.parse(e.data);
-      appendMessage('narrate', '⚠ ' + data.text);
-    } catch (_) {}
-    hideTyping();
+      var resp = await fetch('/api/write/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          novel_path: novelPath,
+          instruction: instruction
+        }),
+        signal: abortController.signal
+      });
+
+      if (!resp.ok) {
+        var errText = await resp.text().catch(function () { return resp.statusText; });
+        setStatus('连接失败 (' + resp.status + ')', 'error');
+        console.error('SSE connection error:', resp.status, errText);
+        return;
+      }
+
+      readerRef = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+      var currentEvent = '';
+
+      while (true) {
+        var result = await readerRef.read();
+        if (result.done) break;
+
+        buffer += decoder.decode(result.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || '';  // 保留未完成的行
+
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith('data: ')) {
+            try {
+              var data = JSON.parse(line.slice(6));
+              handleSSEEvent(currentEvent, data);
+            } catch (parseErr) {
+              console.error('SSE parse error:', parseErr, 'line:', line);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('SSE error:', err);
+        setStatus('连接中断', 'error');
+        removeTypingCursor();
+      }
+    }
+  }
+
+  // ============================================================
+  // 注入指令
+  // ============================================================
+  async function injectInstruction() {
+    var instruction = injectInput.value.trim();
+    if (!instruction) return;
+
+    injectBtn.disabled = true;
+    injectInput.value = '';
+    setStatus('处理指令中...', 'active');
+
+    try {
+      var resp = await fetch('/api/write/inject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instruction: instruction })
+      });
+      var result = await resp.json();
+      if (result.status !== 'ok') {
+        console.error('Inject failed:', result.error || result.status);
+        setStatus('指令发送失败', 'error');
+      } else {
+        setStatus('指令已发送', 'active');
+        injectBtn.disabled = true;
+        injectInput.disabled = true;
+      }
+    } catch (err) {
+      console.error('Inject error:', err);
+      setStatus('指令发送失败', 'error');
+      injectBtn.disabled = false;
+      injectInput.disabled = false;
+    }
+  }
+
+  // ============================================================
+  // 查询状态
+  // ============================================================
+  async function pollState() {
+    try {
+      var resp = await fetch('/api/write/state');
+      if (!resp.ok) return;
+      var state = await resp.json();
+      if (state.phase) {
+        setStatus(state.phase, 'active');
+      }
+      if (state.chapter && readerTitle.textContent.indexOf('第' + state.chapter + '章') === -1) {
+        readerTitle.textContent = readerTitle.textContent.split('·')[0].trim() + ' · 第' + state.chapter + '章';
+      }
+    } catch (_) {
+      // 静默失败
+    }
+  }
+
+  // ============================================================
+  // 事件绑定
+  // ============================================================
+
+  // 启动表单
+  startForm.addEventListener('submit', startWriting);
+
+  // 注入指令——按钮点击
+  injectBtn.addEventListener('click', injectInstruction);
+
+  // 注入指令——回车键
+  injectInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      injectInstruction();
+    }
   });
-}
 
-// ============================================================
-// 消息渲染
-// ============================================================
-function appendMessage(type, text, character) {
-  hideTyping();
-  const area = document.getElementById('dialogue-area');
-  const div = document.createElement('div');
-  div.className = 'msg ' + (type === 'narrate' ? 'narrate' : 'dialogue');
+  // 定期轮询状态（每 15 秒）
+  setInterval(pollState, 15000);
 
-  if (type === 'dialogue' && character) {
-    const color = charColor(character);
-    div.style.borderLeftColor = color;
-    div.innerHTML = `<div class="msg-header" style="color:${color}">${escapeHtml(character)}</div>
-                     <div class="msg-body">${escapeHtml(text)}</div>`;
-  } else if (type === 'user_msg') {
-    div.classList.add('user-msg');
-    div.innerHTML = `<div class="msg-header">${escapeHtml(character || '你')}</div>
-                     <div class="msg-body">${escapeHtml(text)}</div>`;
-  } else {
-    div.textContent = text;
-  }
-
-  area.appendChild(div);
-  area.scrollTop = area.scrollHeight;
-}
-
-function showTyping() {
-  isWaiting = true;
-  document.getElementById('typing').style.display = 'block';
-  document.getElementById('send-btn').disabled = true;
-  document.getElementById('dialogue-area').scrollTop = document.getElementById('dialogue-area').scrollHeight;
-}
-
-function hideTyping() {
-  isWaiting = false;
-  document.getElementById('typing').style.display = 'none';
-  document.getElementById('send-btn').disabled = false;
-  document.getElementById('user-input').focus();
-}
-
-// ============================================================
-// 抉择渲染
-// ============================================================
-function showChoice(data) {
-  const panel = document.getElementById('choice-panel');
-  const title = document.getElementById('choice-title');
-  const buttons = document.getElementById('choice-buttons');
-
-  title.textContent = '⚡ ' + (data.moment || '抉择时刻');
-  buttons.innerHTML = '';
-
-  const letters = ['A', 'B', 'C'];
-  data.choices.forEach((c, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'choice-btn';
-    btn.textContent = `${letters[i]}) ${c.text}`;
-    btn.addEventListener('click', () => submitChoice(i));
-    buttons.appendChild(btn);
-  });
-
-  panel.style.display = 'block';
-  document.getElementById('input-area').style.display = 'none';
-  panel.scrollIntoView({ behavior: 'smooth' });
-}
-
-async function submitChoice(index) {
-  document.getElementById('choice-panel').style.display = 'none';
-  document.getElementById('input-area').style.display = 'flex';
-  showTyping();
-
-  try {
-    await fetch(`${API_BASE}/api/play/choice`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, choice_index: index }),
-    });
-  } catch (err) {
-    appendMessage('narrate', '⚠ 提交选择失败: ' + err.message);
-    hideTyping();
-  }
-}
-
-// ============================================================
-// 发送消息
-// ============================================================
-async function sendMessage() {
-  const input = document.getElementById('user-input');
-  const text = input.value.trim();
-  if (!text || isWaiting) return;
-
-  input.value = '';
-  showTyping();
-
-  try {
-    await fetch(`${API_BASE}/api/play/message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, text: text }),
-    });
-  } catch (err) {
-    appendMessage('narrate', '⚠ 发送失败: ' + err.message);
-    hideTyping();
-  }
-}
-
-document.getElementById('send-btn').addEventListener('click', sendMessage);
-document.getElementById('user-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') sendMessage();
-});
-
-// ============================================================
-// 侧栏更新
-// ============================================================
-function updateSidebar(state) {
-  if (!state) return;
-
-  // 亲密度
-  const intimacy = state.intimacy || {};
-  const intimacyList = document.getElementById('intimacy-list');
-  intimacyList.innerHTML = Object.entries(intimacy).map(([name, score]) => {
-    const pct = Math.abs(score);
-    const bar = Math.min(100, Math.abs(score));
-    const color = score >= 0 ? 'var(--green)' : 'var(--danger)';
-    const fillColor = score >= 50 ? 'var(--green)' : score >= 0 ? 'var(--blue)' : 'var(--danger)';
-    return `<div class="intimacy-item">
-      <span>${escapeHtml(name)}</span>
-      <span style="font-size:0.8rem;width:30px;text-align:right">${score >= 0 ? '+' : ''}${score}</span>
-      <div class="intimacy-bar"><div class="intimacy-fill" style="width:${bar}%;background:${fillColor}"></div></div>
-    </div>`;
-  }).join('') || '<div style="color:var(--text-dim);font-size:0.85rem">暂无数据</div>';
-
-  // 旗标
-  const flags = state.plot_flags || {};
-  const flagsList = document.getElementById('flags-list');
-  flagsList.innerHTML = Object.entries(flags).map(([k, v]) => {
-    return `<div class="flag-item ${v ? 'set' : ''}">${v ? '☑' : '☐'} ${escapeHtml(k)}</div>`;
-  }).join('') || '<div style="color:var(--text-dim);font-size:0.85rem">暂无</div>';
-
-  // 结局倾向
-  const ending = state.active_ending || 'neutral';
-  const endingNames = { partner: '🤝 搭档线', lone_wolf: '🐺 孤狼线', sacrifice: '💀 牺牲线', neutral: '➖ 中立' };
-  document.getElementById('ending-hint').textContent = endingNames[ending] || ending;
-
-  // 统计
-  document.getElementById('stats-info').innerHTML =
-    `章节: ${state.chapter || '?'}/${state.total_chapters || '?'}<br>` +
-    `轮次: ${state.total_turns || 0}<br>` +
-    `决策: ${(state.regular_decisions || []).length + (state.pivot_decisions || []).length}`;
-
-  // 标题
-  if (state.chapter) {
-    document.getElementById('h-scene').textContent =
-      `第${state.chapter}/${state.total_chapters}章 | 轮次: ${state.total_turns}`;
-  }
-}
-
-function updateSidebarFromEvent(data) {
-  updateSidebar({
-    intimacy: data.intimacy,
-    plot_flags: data.plot_flags,
-    active_ending: data.active_ending,
-    chapter: null,
-    total_chapters: null,
-    total_turns: null,
-    regular_decisions: null,
-    pivot_decisions: null,
-  });
-}
-
-// 定期拉取完整状态
-setInterval(async () => {
-  if (!sessionId) return;
-  try {
-    const resp = await fetch(`${API_BASE}/api/play/state?session_id=${sessionId}`);
-    const state = await resp.json();
-    updateSidebar(state);
-  } catch (_) {}
-}, 5000);
-
-// ============================================================
-// 工具
-// ============================================================
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+})();
 </script>
-
 </body>
 </html>
