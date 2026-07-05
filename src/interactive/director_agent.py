@@ -300,7 +300,7 @@ class DirectorAgent(BaseAgent):
         parts = [f"[第{state.chapter}章 | 轮次{state.total_turns}]"]
 
         since_choice = state.total_turns - state.last_choice_turn
-        if since_choice >= ChoiceEngine.MIN_INTERVAL:
+        if since_choice >= self._choices.MIN_INTERVAL:
             parts.append("[可触发抉择]")
 
         return " ".join(parts) + "\n\n"

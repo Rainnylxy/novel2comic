@@ -19,4 +19,4 @@ if sys.platform == "win32":
 from novel2comic.src.cli.cli import main
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

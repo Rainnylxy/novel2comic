@@ -19,7 +19,7 @@ from .handlers import (
     ChoiceHandler,
     StateHandler,
     StreamHandler,
-    MainHandler,
+    HealthHandler,
 )
 
 
@@ -39,8 +39,6 @@ def create_app(ctx, services, llm) -> tornado.web.Application:
     session_mgr = SessionManager()
     set_session_manager(session_mgr)
 
-    static_dir = os.path.join(os.path.dirname(__file__), "static")
-
     settings = {
         "global_context": ctx,
         "services": services,
@@ -50,13 +48,12 @@ def create_app(ctx, services, llm) -> tornado.web.Application:
 
     app = tornado.web.Application(
         [
-            (r"/", MainHandler),
+            (r"/api/health", HealthHandler),
             (r"/api/play/start", StartHandler),
             (r"/api/play/message", MessageHandler),
             (r"/api/play/choice", ChoiceHandler),
             (r"/api/play/state", StateHandler),
             (r"/api/play/stream", StreamHandler),
-            (r"/static/(.*)", tornado.web.StaticFileHandler, {"path": static_dir}),
         ],
         **settings,
     )

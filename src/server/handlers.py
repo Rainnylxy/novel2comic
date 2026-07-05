@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Tornado Request Handlers —— REST API + SSE + 静态文件。
+"""Tornado Request Handlers —— REST API + SSE。
 
-端点:
+纯后端 API 端点 (前后端分离):
 - POST /api/play/start   — 初始化游戏
 - POST /api/play/message — 发送用户消息
 - POST /api/play/choice  — 提交抉择
 - GET  /api/play/stream  — SSE 事件流
 - GET  /api/play/state   — 查询游戏状态
-- GET  /                  — 前端页面
 """
 
 import json
@@ -239,15 +238,8 @@ class StreamHandler(BaseHandler):
                 break
 
 
-class MainHandler(BaseHandler):
-    """GET / — 提供前端页面。"""
+class HealthHandler(BaseHandler):
+    """GET /api/health — 健康检查。"""
 
     def get(self):
-        static_dir = os.path.join(os.path.dirname(__file__), "static")
-        index_path = os.path.join(static_dir, "index.html")
-        if os.path.exists(index_path):
-            with open(index_path, "r", encoding="utf-8") as f:
-                self.set_header("Content-Type", "text/html; charset=utf-8")
-                self.write(f.read())
-        else:
-            self.write_json({"error": "index.html not found"}, 404)
+        self.write_json({"status": "ok"})

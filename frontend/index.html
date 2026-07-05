@@ -437,6 +437,11 @@
 
 <script>
 // ============================================================
+// 配置 (前后端分离: 前端独立部署，连接后端 API)
+// ============================================================
+const API_BASE = window.API_BASE || 'http://localhost:8000';
+
+// ============================================================
 // 状态
 // ============================================================
 let sessionId = null;
@@ -474,7 +479,7 @@ document.getElementById('start-form').addEventListener('submit', async (e) => {
   };
 
   try {
-    const resp = await fetch('/api/play/start', {
+    const resp = await fetch(`${API_BASE}/api/play/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -501,7 +506,7 @@ document.getElementById('start-form').addEventListener('submit', async (e) => {
 // ============================================================
 function connectSSE() {
   if (eventSource) eventSource.close();
-  eventSource = new EventSource(`/api/play/stream?session_id=${sessionId}`);
+  eventSource = new EventSource(`${API_BASE}/api/play/stream?session_id=${sessionId}`);
 
   eventSource.addEventListener('narrate', (e) => {
     const data = JSON.parse(e.data);
@@ -612,7 +617,7 @@ async function submitChoice(index) {
   showTyping();
 
   try {
-    await fetch('/api/play/choice', {
+    await fetch(`${API_BASE}/api/play/choice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, choice_index: index }),
@@ -635,7 +640,7 @@ async function sendMessage() {
   showTyping();
 
   try {
-    await fetch('/api/play/message', {
+    await fetch(`${API_BASE}/api/play/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, text: text }),
@@ -714,7 +719,7 @@ function updateSidebarFromEvent(data) {
 setInterval(async () => {
   if (!sessionId) return;
   try {
-    const resp = await fetch(`/api/play/state?session_id=${sessionId}`);
+    const resp = await fetch(`${API_BASE}/api/play/state?session_id=${sessionId}`);
     const state = await resp.json();
     updateSidebar(state);
   } catch (_) {}

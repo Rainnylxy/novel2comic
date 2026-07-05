@@ -8,6 +8,7 @@
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -67,8 +68,13 @@ def _build_context_and_services(
     return ctx, services, llm
 
 
-def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext):
-    """加载小说 + 逐章提取 KG。"""
+def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext,
+                force_rebuild: bool = False):
+    """加载小说 + 逐章提取 KG。
+
+    如果已有缓存的 KG（projects 目录下），直接加载，跳过提取。
+    force_rebuild=True 强制重新提取。
+    """
     from ..chapter_parser import parse_novel_chapters
     from ..models import Novel
 
@@ -77,6 +83,18 @@ def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext):
     base_name = os.path.splitext(os.path.basename(novel_path))[0]
     chapters = parse_novel_chapters(text, base_name)
 
+    # 尝试加载已有缓存
+    cached = None
+    if not force_rebuild:
+        cached = _find_cached_novel(services, base_name, len(chapters))
+
+    if cached:
+        ctx.novel = cached
+        print(f"[KG] 从缓存加载：{ctx.novel.story_graph.total_node_count} 个节点，"
+              f"{ctx.novel.story_graph.total_edge_count} 条边")
+        return base_name, chapters, text
+
+    # 无缓存，执行 KG 提取
     project_dir = services.project.create_project_dir(base_name)
     ctx.novel = Novel(
         title=base_name,
@@ -98,6 +116,48 @@ def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext):
     _auto_viz(ctx, base_name)
 
     return base_name, chapters, text
+
+
+def _find_cached_novel(services: ServiceRegistry, base_name: str,
+                       expected_chapters: int):
+    """在 projects 目录中查找已缓存的 novel.json。
+
+    匹配条件: 目录名以 base_name 开头 + novel.json 存在 + 章节数匹配。
+    返回 Novel 对象或 None。
+    """
+    from ..models import Novel
+
+    projects_dir = services.project._projects_dir
+    if not projects_dir or not os.path.isdir(projects_dir):
+        return None
+
+    # 找匹配的 project 目录
+    candidates = sorted(
+        [d for d in os.listdir(projects_dir)
+         if d.startswith(base_name)],
+        reverse=True,  # 最新的在前
+    )
+
+    for dir_name in candidates:
+        novel_path = os.path.join(projects_dir, dir_name, "novel.json")
+        if not os.path.exists(novel_path):
+            continue
+        try:
+            with open(novel_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # 章节数匹配才复用（避免小说文件更新后 KG 过期）
+            saved_chapters = len(data.get("chapters", []))
+            if saved_chapters != expected_chapters:
+                continue
+            novel = Novel.from_dict(data)
+            novel.file_path = ""  # 不从缓存恢复文件路径
+            novel.output_dir = os.path.join(projects_dir, dir_name)
+            if novel.story_graph and novel.story_graph.total_node_count > 0:
+                return novel
+        except Exception:
+            continue
+
+    return None
 
 
 def _auto_viz(ctx: GlobalContext, base_name: str):
@@ -378,8 +438,8 @@ async def run_play(args):
 # 命令入口
 # ============================================================
 
-async def run_server(args):
-    """启动 Web 服务。"""
+def run_server(args):
+    """启动 Web 服务（同步，Tornado 自己管理事件循环）。"""
     api_key = _require_api_key()
     base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
@@ -392,6 +452,56 @@ async def run_server(args):
 
     from ..server import start_server
     start_server(ctx, services, llm, port)
+
+
+def run_frontend(args):
+    """启动前端开发服务器（同步阻塞）。"""
+    import http.server
+    import socketserver
+
+    port = getattr(args, "port", 3000)
+    backend = getattr(args, "backend", "http://localhost:8000")
+
+    # 找到 frontend 目录
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    frontend_dir = os.path.join(root_dir, "frontend")
+
+    # 动态注入 API_BASE
+    html_path = os.path.join(frontend_dir, "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    html_content = html_content.replace(
+        "window.API_BASE || 'http://localhost:8000'",
+        f"'{backend}'",
+    )
+
+    class FrontendHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=frontend_dir, **kwargs)
+
+        def do_GET(self):
+            if self.path == "/" or self.path == "/index.html":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(html_content.encode("utf-8"))
+            else:
+                super().do_GET()
+
+        def log_message(self, format, *args):
+            print(f"[Frontend] {args[0]}")
+
+    with socketserver.TCPServer(("", port), FrontendHandler) as httpd:
+        print(f"\n{'='*50}")
+        print(f"  🖥  互动小说前端")
+        print(f"  地址: http://localhost:{port}")
+        print(f"  后端: {backend}")
+        print(f"  按 Ctrl+C 停止")
+        print(f"{'='*50}\n")
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\n[Frontend] 已停止")
 
 
 async def run_roleplay(args):
@@ -456,9 +566,15 @@ def main():
     play.add_argument("--npcs", nargs="+", default=[],
                       help="指定 NPC 角色列表，如: 江停 严峫。不指定则自动从 KG 检测")
 
-    # server — Web 服务模式
-    srv = subparsers.add_parser("server", help="启动 Web 服务 (互动小说前端)")
+    # server — Web 服务模式 (后端 API)
+    srv = subparsers.add_parser("server", help="启动后端 API 服务")
     srv.add_argument("--port", type=int, default=8000, help="监听端口 (默认 8000)")
+
+    # frontend — 前端开发服务器
+    fe = subparsers.add_parser("frontend", help="启动前端开发服务器")
+    fe.add_argument("--port", type=int, default=3000, help="监听端口 (默认 3000)")
+    fe.add_argument("--backend", type=str, default="http://localhost:8000",
+                    help="后端 API 地址 (默认 http://localhost:8000)")
 
     args = parser.parse_args()
 
@@ -470,5 +586,7 @@ def main():
         asyncio.run(run_play(args))
     elif args.command == "server":
         run_server(args)
+    elif args.command == "frontend":
+        run_frontend(args)
     else:
         asyncio.run(run_roleplay(args))

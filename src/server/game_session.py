@@ -149,7 +149,9 @@ class GameSession:
         if not result:
             return
 
-        result_text = str(result)
+        # AgentResult 对象，取 output 字段（纯文本），
+        # 避免把 tool_calls / steps 等元数据也序列化进去
+        result_text = getattr(result, 'output', '') or str(result)
 
         # 检测抉择标记
         if "<!--CHOICE-->" in result_text:
