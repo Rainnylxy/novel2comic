@@ -31,14 +31,15 @@ def _get_or_create_pipeline(ctx, services, llm, novel_path: str) -> Continuation
     global _active_pipeline
     with _pipeline_lock:
         if _active_pipeline is not None and _active_pipeline.phase == "idle":
-            # 复用已有的 pipeline（已加载过小说）
-            pass
+            # Check novel_path matches
+            if getattr(_active_pipeline, '_loaded_novel_path', '') != novel_path:
+                _active_pipeline = ContinuationPipeline(ctx, services, llm)
         else:
             _active_pipeline = ContinuationPipeline(ctx, services, llm)
 
-        # 加载小说（如果未加载或加载的是不同小说）
         if _active_pipeline._chapter == 0:
             _active_pipeline.load_novel(novel_path)
+            _active_pipeline._loaded_novel_path = novel_path
 
     return _active_pipeline
 
@@ -87,7 +88,7 @@ class WriteStartHandler(tornado.web.RequestHandler):
             async for event in pipeline.run(instruction):
                 sse_text = event.to_sse()
                 self.write(sse_text)
-                self.flush()
+                await self.flush()
 
         except Exception as e:
             error_event = {
@@ -95,7 +96,7 @@ class WriteStartHandler(tornado.web.RequestHandler):
                 "data": json.dumps({"message": str(e)}, ensure_ascii=False),
             }
             self.write(f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n")
-            self.flush()
+            await self.flush()
         finally:
             self.finish()
 

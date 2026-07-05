@@ -155,6 +155,9 @@ class ChapterWriter:
 
         async with httpx.AsyncClient(**client_kwargs) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as response:
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    raise RuntimeError(f"LLM API error {response.status_code}: {error_text.decode()[:500]}")
                 async for line in response.aiter_lines():
                     # 检查是否需要 abort
                     if self._aborted:

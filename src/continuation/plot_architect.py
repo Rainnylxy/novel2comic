@@ -67,6 +67,7 @@ class PlotArchitect(BaseAgent):
             "last_chapter": last_chapter,
             "user_instruction": user_instruction,
         }
+        self._needs_rebuild = True
 
     def _build_dynamic_prefix(self) -> str:
         """构建注入 user message 的动态前缀。
