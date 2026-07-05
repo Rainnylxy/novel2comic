@@ -537,6 +537,89 @@ async def run_roleplay(args):
 
 
 # ============================================================
+# Write 模式 —— 续写模式
+# ============================================================
+
+async def run_write(args):
+    """续写模式 —— 终端流式输出。"""
+    api_key = _require_api_key()
+    base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
+    model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
+    tool_model = os.getenv("AGENTFLOW_TOOL_MODEL", model)
+    proxy = os.getenv("AGENTFLOW_PROXY", "")
+
+    ctx, services, llm = _build_context_and_services(
+        api_key, base_url, model, proxy, tool_model,
+    )
+    _load_novel(args.novel, services, ctx)
+
+    from ..continuation.pipeline import ContinuationPipeline
+
+    pipeline = ContinuationPipeline(ctx, services, llm)
+    pipeline.load_novel(args.novel)
+
+    print(f"\n[续写] 小说: {ctx.novel.title}")
+    print(f"[续写] 当前进度: {pipeline.chapter} 章")
+    print(f"[续写] 正在规划第 {pipeline.chapter + 1} 章...")
+    print()
+
+    instruction = getattr(args, "instruction", "")
+
+    try:
+        async for event in pipeline.run(instruction):
+            if event.event_type == "phase":
+                phase = event.data.get("phase", "")
+                labels = {
+                    "planning": "📋 正在规划大纲...",
+                    "writing": "✍️ 正在写作...",
+                    "reviewing": "🔍 正在一致性审校...",
+                    "revising": "📝 正在修订...",
+                }
+                if phase in labels:
+                    print(f"\n{labels[phase]}")
+            elif event.event_type == "outline":
+                outline = event.data
+                print(f"  章标题: {outline.get('title', '?')}")
+                print(f"  梗概: {outline.get('synopsis', '?')[:120]}...")
+            elif event.event_type == "fragment":
+                frag = event.data
+                _print_fragment_terminal(frag)
+            elif event.event_type == "review":
+                issues = event.data.get("issues", [])
+                score = event.data.get("overall_score", "?")
+                print(f"\n  审校完成: {len(issues)} 个问题 | 评分: {score}")
+            elif event.event_type == "complete":
+                print(f"\n{'='*50}")
+                print(f"  ✅ 续写完成")
+                print(f"{'='*50}")
+            elif event.event_type == "error":
+                print(f"\n❌ 错误: {event.data.get('message', '')}")
+    except KeyboardInterrupt:
+        print("\n[续写] 用户中断")
+    except Exception as e:
+        print(f"\n❌ 错误: {e}")
+
+
+def _print_fragment_terminal(frag: dict):
+    """在终端中显示一个 fragment。"""
+    ftype = frag.get("type", "narration")
+    text = frag.get("text", "")
+    character = frag.get("character", "")
+
+    if ftype == "narration":
+        print(f"\n  {text}")
+    elif ftype == "dialogue":
+        print(f"\n  [{character}] {text}")
+    elif ftype == "action":
+        print(f"    ({text})")
+    elif ftype == "inner_thought":
+        print(f"\n  [{character}] ┆ {text} ┆")
+    elif ftype == "divider":
+        label = frag.get("divider_label", "")
+        print(f"\n  {'─' * 20} {label} {'─' * 20}")
+
+
+# ============================================================
 # CLI 入口
 # ============================================================
 
@@ -576,6 +659,12 @@ def main():
     fe.add_argument("--backend", type=str, default="http://localhost:8000",
                     help="后端 API 地址 (默认 http://localhost:8000)")
 
+    # write — 续写模式
+    wr = subparsers.add_parser("write", help="AI 自主续写模式")
+    wr.add_argument("--novel", type=str, required=True, help="小说文件路径")
+    wr.add_argument("--instruction", type=str, default="",
+                    help="初始续写方向指令（可选，如'让江停更主动'）")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -588,5 +677,7 @@ def main():
         run_server(args)
     elif args.command == "frontend":
         run_frontend(args)
+    elif args.command == "write":
+        asyncio.run(run_write(args))
     else:
         asyncio.run(run_roleplay(args))
