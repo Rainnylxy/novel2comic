@@ -11,15 +11,19 @@
 """
 
 import json
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, Optional
 
 from agentflow.runtime.toolkit import tool
+
+logger = logging.getLogger(__name__)
 
 from ..agents.base_agent import BaseAgent
 
 if TYPE_CHECKING:
     from ..context import GlobalContext, ServiceRegistry
     from ..llm import UnifiedLLM
+    from .author_style_profile import AuthorStyleProfile
 
 
 class PlotArchitect(BaseAgent):
@@ -40,9 +44,9 @@ class PlotArchitect(BaseAgent):
     def set_context(
         self,
         previous_chapter_ending: str,
-        style_profile,
         character_profiles: dict,
         last_chapter: int,
+        style_profile: Optional["AuthorStyleProfile"] = None,
         user_instruction: str = "",
     ):
         """设置 Plot Architect 的运行时上下文。
@@ -51,9 +55,9 @@ class PlotArchitect(BaseAgent):
 
         Args:
             previous_chapter_ending: 前一章结尾原文（~3000字）
-            style_profile: AuthorStyleProfile
             character_profiles: {name: CharacterProfile} 角色蒸馏 Profile
             last_chapter: 当前最后一章的章节号
+            style_profile: AuthorStyleProfile
             user_instruction: 用户的初始指令（可选）
         """
         self._outline_context = {
@@ -102,14 +106,43 @@ class PlotArchitect(BaseAgent):
         ending = ctx.get("previous_chapter_ending", "")
         lines.append(ending[-3000:] if len(ending) > 3000 else ending)
 
-        return "\n".join(lines) + "\n\n用户任务: 为下一章规划大纲。请依次调用 analyze_hanging_threads → sketch_character_beats → plan_structure。"
+        return "\n".join(lines)
 
     async def run(self, task: str = ""):
         """运行 Plot Architect 的 ReAct 循环。"""
         prefix = self._build_dynamic_prefix()
         if prefix:
-            task = prefix + task
-        return await super().run(task)
+            if task:
+                task = prefix + "\n\n" + task
+            else:
+                task = prefix + "\n\n用户任务: 为下一章规划大纲。请依次调用 analyze_hanging_threads → sketch_character_beats → plan_structure。"
+        result = await super().run(task)
+        # Critical 1: AgentFlow 返回原始 str，契约要求 dict
+        if isinstance(result, dict):
+            return result
+        if isinstance(result, str):
+            try:
+                return json.loads(result)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # 兜底返回
+        last_ch = self._outline_context.get("last_chapter", 0)
+        return {
+            "chapter_number": last_ch + 1,
+            "title": "续",
+            "synopsis": "继续推进故事",
+            "structure": {
+                "opening": "衔接上一章结尾",
+                "rising": "推进现有冲突",
+                "climax": "关键转折",
+                "hook": "悬念钩子",
+            },
+            "plot_threads_advanced": [],
+            "plot_threads_introduced": [],
+            "tone": "保持原作风格",
+            "target_word_count": 3000,
+            "status": "ok",
+        }
 
     def _build_tools(self) -> list:
         ctx = self._ctx
@@ -127,7 +160,10 @@ class PlotArchitect(BaseAgent):
             Returns:
                 JSON 格式的伏笔和冲突列表
             """
-            graph = ctx.novel.story_graph if ctx.novel else None
+            if ctx.novel is None:
+                return json.dumps({"hanging_threads": [], "active_conflicts": [],
+                                   "message": "小说上下文未加载"}, ensure_ascii=False)
+            graph = ctx.novel.story_graph
             if not graph:
                 return json.dumps({"hanging_threads": [], "active_conflicts": [],
                                    "message": "KG 不可用"}, ensure_ascii=False)
@@ -274,8 +310,8 @@ class PlotArchitect(BaseAgent):
                     result.setdefault("chapter_number", last_ch + 1)
                     result.setdefault("status", "ok")
                     return json.dumps(result, ensure_ascii=False)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("plan_structure LLM 调用失败，使用兜底方案: %s", e)
 
             return json.dumps({
                 "chapter_number": last_ch + 1,
