@@ -13,5 +13,10 @@
 from .chapter_writer import ChapterWriter
 from .consistency_reviewer import ConsistencyReviewer
 from .revision_editor import RevisionEditor
+from .plot_architect import PlotArchitect
+from .pipeline import ContinuationPipeline
 
-__all__ = ["ChapterWriter", "ConsistencyReviewer", "RevisionEditor"]
+__all__ = [
+    "ChapterWriter", "ConsistencyReviewer", "RevisionEditor",
+    "PlotArchitect", "ContinuationPipeline",
+]
