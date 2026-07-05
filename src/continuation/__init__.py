@@ -11,5 +11,7 @@
 """
 
 from .chapter_writer import ChapterWriter
+from .consistency_reviewer import ConsistencyReviewer
+from .revision_editor import RevisionEditor
 
-__all__ = ["ChapterWriter"]
+__all__ = ["ChapterWriter", "ConsistencyReviewer", "RevisionEditor"]
