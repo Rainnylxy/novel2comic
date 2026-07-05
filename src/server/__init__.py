@@ -21,6 +21,11 @@ from .handlers import (
     StreamHandler,
     HealthHandler,
 )
+from .write_handlers import (
+    WriteStartHandler,
+    WriteInjectHandler,
+    WriteStateHandler,
+)
 
 
 def create_app(ctx, services, llm) -> tornado.web.Application:
@@ -48,12 +53,17 @@ def create_app(ctx, services, llm) -> tornado.web.Application:
 
     app = tornado.web.Application(
         [
+            # Roleplay API（保持不动）
             (r"/api/health", HealthHandler),
             (r"/api/play/start", StartHandler),
             (r"/api/play/message", MessageHandler),
             (r"/api/play/choice", ChoiceHandler),
             (r"/api/play/state", StateHandler),
             (r"/api/play/stream", StreamHandler),
+            # 续写 API（新增）
+            (r"/api/write/start", WriteStartHandler),
+            (r"/api/write/inject", WriteInjectHandler),
+            (r"/api/write/state", WriteStateHandler),
         ],
         **settings,
     )
@@ -75,8 +85,9 @@ def start_server(ctx, services, llm, port: int = 8000):
     app = create_app(ctx, services, llm)
     app.listen(port)
     print(f"\n{'='*50}")
-    print(f"  📖 互动小说引擎 Web 服务")
-    print(f"  地址: http://localhost:{port}")
+    print(f"  📖 Novel2Comic Web 服务")
+    print(f"  🎭 Roleplay API: http://localhost:{port}/api/play/*")
+    print(f"  ✍️  续写 API: http://localhost:{port}/api/write/*")
     print(f"  按 Ctrl+C 停止服务")
     print(f"{'='*50}\n")
     tornado.ioloop.IOLoop.current().start()
