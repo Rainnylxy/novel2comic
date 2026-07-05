@@ -9,3 +9,7 @@
   - RevisionEditor: 修订编辑
   - ContinuationPipeline: 流水线编排器
 """
+
+from .chapter_writer import ChapterWriter
+
+__all__ = ["ChapterWriter"]
