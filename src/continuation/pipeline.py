@@ -140,26 +140,35 @@ class ContinuationPipeline:
                 self._save_cached_style(project_dir, self._style_profile)
             print(f"[Style] 文风蒸馏完成")
 
-        # 4. 蒸馏主要角色 Profile（importance >= 6）
+        # 4. 蒸馏主要角色 Profile（importance >= 5，最多 8 个）
         char_distiller = CharacterDistiller(self._llm, self._kg)
         persons = self._kg.get_all_persons(graph)
         important = [p for p in persons if p.importance >= 5]
+        print(f"[Char] 蒸馏 {len(important[:8])} 个主要角色...", end=" ", flush=True)
+        distilled_count = 0
         for person in important[:8]:
             try:
                 profile = char_distiller.distill_character(
                     person.name, text, graph,
                 )
                 self._character_profiles[person.name] = profile
+                distilled_count += 1
+                print(f"{person.name}", end=" ", flush=True)
             except Exception:
-                pass
+                print(f"{person.name}(失败)", end=" ", flush=True)
+        print(f"| 完成 {distilled_count}/{len(important[:8])}")
 
         # 5. 提取最后一章结尾
         if chapters:
             last_ch = chapters[-1]
             self._previous_chapter_ending = last_ch.content[-3000:] if len(last_ch.content) > 3000 else last_ch.content
+            print(f"[Context] 最后一章: 第{last_ch.index}章, "
+                  f"结尾上下文: {len(self._previous_chapter_ending)} 字")
 
         # 6. 初始化 Agent
+        print(f"[Agents] 初始化 4 个 Agent...", end=" ", flush=True)
         self._init_agents()
+        print("完成")
 
     def _get_character_statuses(self) -> dict:
         """获取角色状态映射（KG baseline + 已验证角色的覆盖值）。
@@ -204,6 +213,9 @@ class ContinuationPipeline:
 
         if not mentioned:
             return
+
+        print(f"  [Verify] 现场验证 {len(mentioned)} 个角色的状态...",
+              end=" ", flush=True)
 
         novel_text = self._get_novel_text()
         if not novel_text:
@@ -420,6 +432,7 @@ class ContinuationPipeline:
 
         # —— 阶段 1: 大纲 ——
         self._phase = "planning"
+        print(f"\n{'─'*40}\n[Phase 1/4] 剧情规划 — Plot Architect 分析 KG 并生成大纲...")
         yield PipelineEvent("phase", {"phase": "planning"})
 
         self.architect.set_context(
@@ -444,6 +457,7 @@ class ContinuationPipeline:
 
         # —— 阶段 2: 写作 ——
         self._phase = "writing"
+        print(f"[Phase 2/4] 流式写作 — Chapter Writer 正在生成章节内容...")
         yield PipelineEvent("phase", {"phase": "writing"})
 
         self.writer.set_context(
@@ -462,6 +476,7 @@ class ContinuationPipeline:
 
         # —— 阶段 3: 审校 ——
         self._phase = "reviewing"
+        print(f"[Phase 3/4] 一致性审校 — Reviewer 正在对照 KG 检查草稿...")
         yield PipelineEvent("phase", {"phase": "reviewing"})
 
         self.reviewer.set_context(
@@ -472,9 +487,16 @@ class ContinuationPipeline:
         review_result_raw = await self.reviewer.run("审校草稿")
         issues = self._parse_review(review_result_raw)
         yield PipelineEvent("review", issues)
+        issue_count = len(issues.get("issues", []))
+        score = issues.get("overall_score", "?")
+        if issue_count > 0:
+            print(f"  审校发现 {issue_count} 个问题 (评分: {score})")
+        else:
+            print(f"  审校通过 (评分: {score})")
 
         # —— 阶段 4: 修订 ——
         self._phase = "revising"
+        print(f"[Phase 4/4] 修订 — Editor 正在根据审校意见修改草稿...")
         yield PipelineEvent("phase", {"phase": "revising"})
 
         if issues.get("issues"):
@@ -493,6 +515,7 @@ class ContinuationPipeline:
 
         # 完成
         self._phase = "idle"
+        print(f"{'─'*40}\n[完成] 续写流水线结束 — {self._fragment_count} 个片段")
         yield PipelineEvent("done", {})
 
     async def inject(self, instruction: str):
