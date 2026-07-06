@@ -52,6 +52,7 @@ class ChapterWriter:
         self._previous_chapter_ending: str = ""
         self._character_profiles: dict = {}
         self._character_statuses: dict = {}  # {name: status}  from KG
+        self._character_dossiers: dict = {}  # {name: {status,ending,foreshadowing,...}}
 
     def set_context(
         self,
@@ -60,6 +61,7 @@ class ChapterWriter:
         previous_chapter_ending: str,
         character_profiles: dict,
         character_statuses: dict = None,
+        character_dossiers: dict = None,
     ):
         """设置 Writer 运行时上下文。"""
         self._outline = outline
@@ -67,6 +69,7 @@ class ChapterWriter:
         self._previous_chapter_ending = previous_chapter_ending
         self._character_profiles = character_profiles
         self._character_statuses = character_statuses or {}
+        self._character_dossiers = character_dossiers or {}
 
     async def inject(self, instruction: str):
         """注入用户指令。触发当前流中断并重连。
@@ -261,6 +264,29 @@ class ChapterWriter:
             if missing_chars:
                 parts.append(f"以下角色**下落不明**: {', '.join(missing_chars)}")
                 parts.append("下落不明角色不能直接出现，只能通过线索或他人转述提及。")
+
+        # 注入角色背景档案（结局 + 伏笔）
+        if self._character_dossiers:
+            parts.append("\n## 角色背景档案（从原文现场分析，用于续写时的故事连贯性）")
+            for name, d in self._character_dossiers.items():
+                status = d.get("status", "?")
+                ending = d.get("ending", "")
+                foreshadowing = d.get("foreshadowing", "")
+                relationships = d.get("key_relationships", "")
+                parts.append(f"\n### {name}（状态: {status}）")
+                if ending:
+                    parts.append(f"- 结局: {ending}")
+                if foreshadowing and foreshadowing != "无":
+                    parts.append(f"- 未解决伏笔: {foreshadowing}")
+                if relationships:
+                    parts.append(f"- 关键关系: {relationships}")
+                # 使用指引
+                if status in ("dead", "deceased", "killed"):
+                    parts.append("- ⚠️ 使用方式: 只能以回忆/闪回/他人提及出现。利用其'结局'和'伏笔'作为故事背景。")
+                elif status == "missing":
+                    parts.append("- ⚠️ 使用方式: 不能直接出场。可在他人的对话或线索中暗示其存在。")
+                elif status == "arrested":
+                    parts.append("- ⚠️ 使用方式: 不能自由行动。可在监狱/审讯场景中出现，或通过律师/探监等方式间接参与。")
 
         # 注入角色约束
         if self._character_profiles:

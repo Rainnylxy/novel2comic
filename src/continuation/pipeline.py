@@ -58,8 +58,10 @@ class ContinuationPipeline:
 
         # 角色状态验证标记：已验证过的角色不再重复验证
         self._status_verified: set = set()
-        # 验证修正的状态（待持久化回 novel.json）
+        # 验证修正的状态（待持久化）
         self._status_fixes: dict = {}
+        # 角色档案（现场验证后的完整信息：结局、伏笔、关系）
+        self._character_dossiers: dict = {}
 
         # 缓存数据
         self._style_profile = None
@@ -140,6 +142,11 @@ class ContinuationPipeline:
                         print(f"  [KG Fix] {p.name}: {p.status} → {fixed} (从缓存恢复)")
                         p._status = fixed
             print(f"  [KG] 从缓存恢复 {len(self._status_fixes)} 个状态修正")
+
+        # 加载之前验证过的角色档案（结局/伏笔/关系）
+        self._character_dossiers = self._load_character_dossiers()
+        if self._character_dossiers:
+            print(f"  [Dossier] 从缓存加载 {len(self._character_dossiers)} 个角色档案")
 
         # 3. 蒸馏文风 Profile（优先读缓存）
         distiller = AuthorStyleDistiller(self._llm)
@@ -273,28 +280,36 @@ class ContinuationPipeline:
             last_text = "\n".join(chapters.get(ch, "") for ch in last_chapters)
             context = self._extract_name_context(name, last_text)
 
-            # LLM 现场分析
-            resolved = self._llm_resolve_status(name, context, last_chapters[-1])
+            # LLM 现场分析（完整档案，不只是状态）
+            dossier = self._llm_resolve_character_dossier(
+                name, context, last_chapters[-1],
+            )
 
             # 标记已验证
             self._status_verified.add(name)
 
-            if resolved:
+            if dossier:
+                resolved = dossier.get("status", "")
+                ending = dossier.get("ending", "")
+                foreshadowing = dossier.get("foreshadowing", "")
+
                 old = person.status
                 if resolved != old:
-                    print(f"{old} → {resolved}")
-                    print(f"  [KG Fix] {name}: {old} → {resolved} "
-                          f"(章节 {last_chapters[-1]})")
+                    print(f"{old} → {resolved} ({ending[:40]}...)")
+                    print(f"  [KG Fix] {name}: {old} → {resolved}")
                 else:
-                    print(f"确认 {resolved}（与 KG 一致）")
-                person._status = resolved  # 修正内存中的 KG
-                self._status_fixes[name] = resolved  # 记录待持久化
+                    print(f"确认 {resolved}" + (f" — {ending[:40]}" if ending else ""))
+                person._status = resolved
+                self._status_fixes[name] = resolved
+                self._character_dossiers[name] = dossier  # 存档，供 Writer 使用
             else:
                 print("无法确定（LLM 返回空）")
 
         # 持久化修正到磁盘（下次启动自动加载）
         if self._status_fixes:
             self._save_status_fixes()
+        if self._character_dossiers:
+            self._save_character_dossiers()
 
     def _load_status_fixes(self) -> dict:
         """加载之前验证过的状态修正。"""
@@ -322,12 +337,38 @@ class ContinuationPipeline:
         except Exception:
             pass
 
-    def _llm_resolve_status(self, name: str, context: str,
-                            last_chapter: int) -> str:
-        """LLM 分析角色当前状态。
+    def _load_character_dossiers(self) -> dict:
+        """加载之前验证过的角色档案（结局/伏笔/关系）。"""
+        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
+        if not project_dir:
+            return {}
+        path = os.path.join(project_dir, "character_dossiers.json")
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
 
-        基于该角色最后几次出场的原文场景，判断其当前状态。
-        只调用 1 次 LLM，传入已提取好（规则定位）的场景文本。
+    def _save_character_dossiers(self):
+        """持久化角色档案到项目目录。"""
+        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
+        if not project_dir:
+            return
+        path = os.path.join(project_dir, "character_dossiers.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._character_dossiers, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _llm_resolve_character_dossier(self, name: str, context: str,
+                                        last_chapter: int) -> dict:
+        """LLM 分析角色完整档案：状态 + 结局 + 伏笔。
+
+        基于该角色最后几次出场的原文场景，全面分析。
+        返回的 dossier 会注入 Writer prompt 作为背景约束。
 
         Args:
             name: 角色名
@@ -335,12 +376,16 @@ class ContinuationPipeline:
             last_chapter: 最后出场章节
 
         Returns:
-            状态字符串（dead/active/missing/arrested），或空字符串（无法确定）
+            {"status": "dead", "ending": "第112章被枪击身亡...",
+             "foreshadowing": "他死前提到'组织里还有内鬼'，这个线索尚未解决",
+             "key_relationships": "与严峫是敌对关系，与黑桃K是上下级",
+             "evidence": "确认状态的原文引用"}
+            或空 dict（无法确定）
         """
         if not context or len(context) < 20:
-            return ""
+            return {}
 
-        prompt = f"""你是小说分析员。根据角色最后几次出场的原文片段，判断该角色当前状态。
+        prompt = f"""你是专业小说分析员。根据角色最后几次出场的原文片段，全面分析该角色的当前状态和结局。
 
 角色: {name}
 最后出场章节: 第{last_chapter}章
@@ -348,30 +393,30 @@ class ContinuationPipeline:
 原文场景:
 {context[:3000]}
 
-该角色当前是:
-- dead: 原文明确描写了死亡（如"停止了呼吸""确认死亡""尸体"等）
-- arrested: 被逮捕/关押
-- missing: 失踪/下落不明
-- active: 还活着，正常活动
+请返回 JSON:
+{{
+  "status": "dead|active|missing|arrested",
+  "ending": "该角色在原文中的结局——如何退场的？最后在做什么？一句话概括。如果已死亡，说明死因和方式。",
+  "foreshadowing": "该角色身上还有哪些未解决的伏笔或线索？比如死前未说完的话、未完成的计划、留下的悬念。如果没有，填'无'。",
+  "key_relationships": "该角色与其他角色的关键关系——对谁重要？谁在意他的生死？一句话概括。",
+  "evidence": "证明以上判断的原文关键句引用"
+}}
 
-返回 JSON: {{"status": "dead|active|missing|arrested", "evidence": "原文关键句（证明该状态的一句原文引用）"}}
 只返回 JSON。"""
 
         try:
             result = self._llm.chat_json(
                 system_prompt="你是专业小说分析员。只返回 JSON，不返回其他内容。",
                 user_prompt=prompt,
-                temperature=0.2,
-                max_tokens=512,
+                temperature=0.3,
+                max_tokens=1024,
             )
-            if isinstance(result, dict):
-                status = result.get("status", "")
-                if status in ("dead", "arrested", "missing", "active"):
-                    return status
+            if isinstance(result, dict) and result.get("status"):
+                return result
         except Exception:
             pass
 
-        return ""
+        return {}
 
     def _get_novel_text(self) -> str:
         """获取小说全文文本。"""
@@ -534,6 +579,7 @@ class ContinuationPipeline:
             previous_chapter_ending=self._previous_chapter_ending,
             character_profiles=self._character_profiles,
             character_statuses=self._get_character_statuses(),
+            character_dossiers=self._character_dossiers,
         )
 
         draft_fragments = []
