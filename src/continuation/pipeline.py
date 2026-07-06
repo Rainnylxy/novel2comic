@@ -140,23 +140,39 @@ class ContinuationPipeline:
                 self._save_cached_style(project_dir, self._style_profile)
             print(f"[Style] 文风蒸馏完成")
 
-        # 4. 蒸馏主要角色 Profile（importance >= 5，最多 8 个）
+        # 4. 蒸馏主要角色 Profile（importance >= 5，最多 8 个）—— 优先读缓存
+        project_dir = self._ctx.novel.output_dir or ""
+        cached_profiles = project_dir and self._load_cached_char_profiles(project_dir)
         char_distiller = CharacterDistiller(self._llm, self._kg)
         persons = self._kg.get_all_persons(graph)
         important = [p for p in persons if p.importance >= 5]
-        print(f"[Char] 蒸馏 {len(important[:8])} 个主要角色...", end=" ", flush=True)
-        distilled_count = 0
-        for person in important[:8]:
-            try:
-                profile = char_distiller.distill_character(
-                    person.name, text, graph,
-                )
-                self._character_profiles[person.name] = profile
-                distilled_count += 1
-                print(f"{person.name}", end=" ", flush=True)
-            except Exception:
-                print(f"{person.name}(失败)", end=" ", flush=True)
-        print(f"| 完成 {distilled_count}/{len(important[:8])}")
+        to_distill = [p for p in important[:8]
+                      if cached_profiles is None or p.name not in cached_profiles]
+
+        if cached_profiles:
+            self._character_profiles = cached_profiles
+            print(f"[Char] 从缓存加载 {len(cached_profiles)} 个角色 Profile")
+
+        if to_distill:
+            print(f"[Char] 蒸馏 {len(to_distill)} 个新角色...", end=" ", flush=True)
+            distilled_count = 0
+            for person in to_distill:
+                try:
+                    profile = char_distiller.distill_character(
+                        person.name, text, graph,
+                    )
+                    self._character_profiles[person.name] = profile
+                    distilled_count += 1
+                    print(f"{person.name}", end=" ", flush=True)
+                except Exception:
+                    print(f"{person.name}(失败)", end=" ", flush=True)
+            print(f"| 完成 {distilled_count}/{len(to_distill)}")
+
+            # 保存到缓存
+            if project_dir:
+                self._save_cached_char_profiles(project_dir, self._character_profiles)
+        elif not cached_profiles:
+            print(f"[Char] 无角色需要蒸馏")
 
         # 5. 提取最后一章结尾
         if chapters:
@@ -634,10 +650,39 @@ class ContinuationPipeline:
 
     def _save_cached_style(self, project_dir: str, profile):
         """缓存文风 Profile 到项目目录。"""
-        import os
         cache_path = os.path.join(project_dir, "author_style_profile.json")
         try:
             with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump(profile.to_dict(), f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _load_cached_char_profiles(self, project_dir: str) -> Optional[dict]:
+        """从项目目录加载缓存的角色 Profile。
+
+        Returns:
+            {name: CharacterProfile} 或 None（缓存不存在或读取失败）
+        """
+        from ..character_profile_models import CharacterProfile
+        cache_path = os.path.join(project_dir, "character_profiles.json")
+        if not os.path.exists(cache_path):
+            return None
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            profiles = {}
+            for name, d in data.items():
+                profiles[name] = CharacterProfile.from_dict(d)
+            return profiles if profiles else None
+        except Exception:
+            return None
+
+    def _save_cached_char_profiles(self, project_dir: str, profiles: dict):
+        """缓存角色 Profile 到项目目录。"""
+        cache_path = os.path.join(project_dir, "character_profiles.json")
+        try:
+            data = {name: p.to_dict() for name, p in profiles.items()}
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
