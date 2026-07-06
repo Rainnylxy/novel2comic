@@ -1,58 +1,64 @@
 # -*- coding: utf-8 -*-
-"""ChapterWriter —— 章节写手（流式核心）。
+"""ChapterWriter —— 章节写手 Agent（AgentFlow ReAct 模式）。
 
-不走 AgentFlow ReAct 循环。直接使用 httpx 异步流式请求 LLM API，
-逐行解析输出为 StoryFragment，通过 async generator yield。
+逐节写作，AgentFlow 自动管理上下文窗口:
+  - System Prompt: 文风约束 + 输出格式（缓存）
+  - WorkingMemory: 大纲 + 已写章节（滑动窗口）
+  - Tools: lookup_character / recall_foreshadowing / write_section
 
-流式控制:
-  - 正常流: 构建 prompt → stream LLM → 逐行解析 → yield StoryFragment
-  - 注入中断: 收到 inject signal → abort 当前 stream → 拼接上下文 → 重新 stream
+流程:
+  Thought → 分析大纲 → write_section("opening") → 流式输出 →
+  Thought → lookup_character("金杰") → 确认状态 →
+  Thought → write_section("rising") → 流式输出 → ...
 """
 
-import asyncio
 import json
-import os
-from typing import AsyncGenerator, Optional, TYPE_CHECKING
+import asyncio
+import logging
+from typing import TYPE_CHECKING
+
+from agentflow.runtime.toolkit import tool
+
+from ..agents.base_agent import BaseAgent
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..context import GlobalContext, ServiceRegistry
     from ..llm import UnifiedLLM
 
 
-class ChapterWriter:
-    """章节写手 —— 流式续写核心。
+class ChapterWriter(BaseAgent):
+    """章节写手 —— AgentFlow ReAct 模式。
 
-    不走 AgentFlow，通过 httpx 直接调用 LLM streaming API。
-    以 StoryFragment 为单位逐条输出。
-
-    用法:
-        writer = ChapterWriter(ctx, services, llm)
-        async for fragment in writer.stream(outline):
-            send_sse(fragment)
+    继承 BaseAgent，通过 ReAct 循环逐节写作。
+    AgentFlow 自动管理 WorkingMemory 上下文窗口，
+    KG 查询通过 lookup_character / recall_foreshadowing 按需触发。
     """
 
-    def __init__(self, ctx: "GlobalContext", services: "ServiceRegistry",
-                 llm: "UnifiedLLM"):
-        self._ctx = ctx
-        self._services = services
-        self._llm = llm
+    SKILL_NAME = "chapter_writer"
+
+    def __init__(self, ctx, services, llm, memory=None):
+        super().__init__(ctx, services, llm, memory)
         self._kg = services.kg
-
-        # 注入控制
-        self._inject_event = asyncio.Event()
-        self._inject_instruction: str = ""
-        self._aborted = False
-
-        # 已生成的 fragments（用于 inject 重建上下文）
-        self._generated_fragments: list = []
 
         # 运行时上下文
         self._outline: dict = {}
         self._style_profile = None
         self._previous_chapter_ending: str = ""
         self._character_profiles: dict = {}
-        self._character_statuses: dict = {}  # {name: status}
-        self._graph = None  # StoryGraph，用于查询角色档案
+        self._character_statuses: dict = {}
+        self._graph = None
+
+        # 流式输出队列
+        self._fragment_queue: asyncio.Queue = asyncio.Queue()
+        # 注入信号
+        self._inject_instruction: str = ""
+        self._inject_event: asyncio.Event = asyncio.Event()
+
+    # ================================================================
+    # 上下文设置
+    # ================================================================
 
     def set_context(
         self,
@@ -63,171 +69,35 @@ class ChapterWriter:
         character_statuses: dict = None,
         graph=None,
     ):
-        """设置 Writer 运行时上下文。"""
+        """设置 Writer 运行时上下文，构建 System Prompt。"""
         self._outline = outline
         self._style_profile = style_profile
         self._previous_chapter_ending = previous_chapter_ending
-        self._character_profiles = character_profiles
+        self._character_profiles = character_profiles or {}
         self._character_statuses = character_statuses or {}
         self._graph = graph
 
-    async def inject(self, instruction: str):
-        """注入用户指令。触发当前流中断并重连。
+        # 构建 system prompt（会被 AgentFlow 缓存，不随每轮对话变化）
+        self.set_identity(self._build_system_prompt())
 
-        Args:
-            instruction: 用户的自然语言指令
-        """
-        self._inject_instruction = instruction
-        self._inject_event.set()
-        self._aborted = True
-
-    async def stream(self, outline: dict) -> AsyncGenerator["StoryFragment", None]:
-        """流式生成章节内容。
-
-        每次 yield 一个 StoryFragment。收到 inject signal 后
-        abort 当前请求、拼接上下文、重新 stream。
-
-        Args:
-            outline: Plot Architect 生成的章节大纲
-
-        Yields:
-            StoryFragment: 逐个片段
-        """
-        from .fragment import StoryFragment
-
-        # 首次生成
-        async for fragment in self._do_stream(outline, ""):
-            yield fragment
-
-        # 处理注入循环
-        while self._aborted:
-            self._aborted = False
-            instruction = self._inject_instruction
-            self._inject_instruction = ""
-            self._inject_event.clear()
-
-            # 用已生成的文本 + 新指令作为上下文重新 stream
-            continuation_context = self._build_continuation_context(instruction)
-            async for fragment in self._do_stream(outline, continuation_context):
-                yield fragment
-
-    async def _do_stream(
-        self, outline: dict, extra_context: str
-    ) -> AsyncGenerator["StoryFragment", None]:
-        """执行一次 streaming 请求。
-
-        Args:
-            outline: 章节大纲
-            extra_context: 额外上下文（注入指令 + 已生成文本）
-        """
-        from .fragment import StoryFragment
-
-        # 构建消息
-        system_prompt = self._build_writer_system_prompt()
-        user_prompt = self._build_writer_user_prompt(outline, extra_context)
-
-        # 调用 LLM streaming API
-        # 使用 httpx 异步流式请求
-        import httpx
-
-        api_key = os.getenv("AGENTFLOW_API_KEY", "")
-        base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/")
-        model = os.getenv("AGENTFLOW_MODEL", "deepseek-v4-pro")
-        proxy = os.getenv("AGENTFLOW_PROXY", "")
-
-        url = f"{base_url.rstrip('/')}/chat/completions"
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.7,
-            "max_tokens": 4096,
-            "stream": True,
-        }
-
-        line_buffer = ""
-
-        client_kwargs = {"timeout": httpx.Timeout(300.0, connect=30.0)}
-        if proxy:
-            client_kwargs["proxy"] = proxy
-
-        async with httpx.AsyncClient(**client_kwargs) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    raise RuntimeError(f"LLM API error {response.status_code}: {error_text.decode()[:500]}")
-                async for line in response.aiter_lines():
-                    # 检查是否需要 abort
-                    if self._aborted:
-                        # 不等待 response.close()，直接 break
-                        break
-
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:]  # 去掉 "data: " 前缀
-                    if data_str == "[DONE]":
-                        break
-
-                    try:
-                        chunk = json.loads(data_str)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
-
-                    if not content:
-                        continue
-
-                    line_buffer += content
-
-                    # 按换行拆分，尝试解析完整 fragment
-                    while "\n" in line_buffer:
-                        line_part, line_buffer = line_buffer.split("\n", 1)
-                        fragment = StoryFragment.parse_stream_line(line_part)
-                        if fragment:
-                            self._generated_fragments.append(fragment)
-                            yield fragment
-
-                # 处理 buffer 中剩余的文本
-                if line_buffer.strip() and not self._aborted:
-                    fragment = StoryFragment.parse_stream_line(line_buffer.strip())
-                    if fragment:
-                        self._generated_fragments.append(fragment)
-                        yield fragment
-
-    def _build_continuation_context(self, instruction: str) -> str:
-        """构建注入后重连的上下文。"""
-        parts = [f"[用户指令] {instruction}\n"]
-        parts.append("[已生成内容] 请从以下内容的结尾处自然衔接继续写:\n")
-
-        # 取最后 10 个 fragment 作为上下文
-        recent = self._generated_fragments[-10:] if len(self._generated_fragments) > 10 else self._generated_fragments
-        for f in recent:
-            if f.character:
-                parts.append(f"[{f.type}] {f.character}: {f.text}")
-            else:
-                parts.append(f"[{f.type}] {f.text}")
-
-        parts.append("\n继续写（不要重复上面已有的内容，从下一个自然段开始）:")
-        return "\n".join(parts)
-
-    def _build_writer_system_prompt(self) -> str:
-        """构建 Chapter Writer 的 system prompt。"""
+    def _build_system_prompt(self) -> str:
+        """构建 Writer 的 system prompt。"""
         parts = [
             "## 角色",
-            "你是专业小说续写者。你需要根据大纲、文风约束和角色设定，以结构化片段格式续写小说内容。",
+            "你是专业小说续写者。你需要根据大纲逐节续写小说内容。",
+            "每节写完后，检查是否需要 lookup_character 或 recall_foreshadowing，",
+            "然后再写下一节。不要一次性写完所有内容。",
+            "",
+            "## 工作流程",
+            "1. 阅读大纲 → 理解本节目标",
+            "2. 如果有不熟悉的角色 → lookup_character",
+            "3. 如果需要伏笔参考 → recall_foreshadowing",
+            "4. write_section 写本节内容",
+            "5. 重复 1-4 直到全部完成",
+            "6. 自然终止（不要调用工具，直接输出完成摘要）",
             "",
             "## 输出格式",
-            "严格以 StoryFragment JSON 格式逐行输出，每行一个完整的 JSON 对象:",
-            "",
+            "write_section 工具输出的 text 字段直接以 StoryFragment JSON 格式逐行输出:",
             '  {"type": "narration", "text": "旁白/叙述文本..."}',
             '  {"type": "dialogue", "character": "角色名", "text": "对话内容..."}',
             '  {"type": "action", "character": "角色名", "text": "动作描写..."}',
@@ -235,13 +105,10 @@ class ChapterWriter:
             '  {"type": "divider", "text": "", "divider_label": "时间/地点标签"}',
             "",
             "## 规则",
-            "1. 每行一个完整的 JSON，行末不要有逗号",
-            "2. dialogue 和 inner_thought 的 text 中不要包含引号",
-            "3. action 是小字附加在角色名下，text 要简短（<30字）",
-            "4. narration 用于场景描写和第三人称旁白",
-            "5. 对话和动作交替推进故事，不要连续输出太长的 narration",
-            "6. 保持原作叙事风格和角色性格一致性",
-            "7. 不要输出 JSON 以外的任何内容（不要解释、不要评论）",
+            "1. dialogue/action/inner_thought 的 character 必须用原文中的准确角色名",
+            "2. 对话和动作交替推进，不要连续输出太长的 narration",
+            "3. 保持原作叙事风格和角色性格一致性",
+            "4. 每节写 3-6 段片段即可，不要一节写太多",
         ]
 
         # 注入文风约束
@@ -258,62 +125,12 @@ class ChapterWriter:
             missing_chars = [n for n, s in self._character_statuses.items()
                              if s == "missing"]
             if dead_chars:
-                parts.append("\n## ⚠️ 角色生死状态（绝对约束，违反即为严重错误）")
-                parts.append(f"以下角色**已经死亡**，绝不能以存活状态出现在续写中: {', '.join(dead_chars)}")
-                parts.append("已死亡角色只能以回忆、闪回、幻觉、他人提及的方式出现。不能让已死亡角色说话、行动或参与任何当前时间线的事件。")
+                parts.append(f"\n## ⚠️ 已死亡角色: {', '.join(dead_chars)}")
+                parts.append("只能以回忆/闪回/他人提及出现。")
             if missing_chars:
-                parts.append(f"以下角色**下落不明**: {', '.join(missing_chars)}")
-                parts.append("下落不明角色不能直接出现，只能通过线索或他人转述提及。")
+                parts.append(f"\n## ⚠️ 下落不明角色: {', '.join(missing_chars)}")
 
-        # 注入角色背景档案（从 KG 组装：PersonNode.status + EventNode.cause/effect + RelationshipEdge）
-        if self._character_statuses and self._graph:
-            parts.append("\n## 角色背景档案（来自 KG，用于续写故事连贯性）")
-            for name, status in self._character_statuses.items():
-                person = self._graph.get_person_node(name) if self._graph else None
-                parts.append(f"\n### {name}（状态: {status}）")
-
-                # 结局：查询该角色最后参与的事件
-                if self._graph and hasattr(self._graph, 'character_events'):
-                    events = self._graph.character_events(name)
-                    if events:
-                        last_event = events[-1]
-                        parts.append(f"- 最后事件: {last_event.get('name', '?')}"
-                                     f"（第{last_event.get('chapter_start','?')}章）: "
-                                     f"{last_event.get('summary', '')[:100]}")
-
-                # 伏笔：查询 KG 中以该角色为 cause 的因果链
-                if self._graph and hasattr(self._graph, 'event_relation_edges'):
-                    pending = []
-                    for edge in self._graph.event_relation_edges:
-                        if edge.relation_type == "causes":
-                            ev = self._graph.get_event_node(
-                                edge.from_event.split(":", 1)[-1]
-                            ) if hasattr(self._graph, 'get_event_node') else None
-                            if ev and name in (ev.cause or ""):
-                                pending.append(f"「{ev.name}」→ {edge.to_event}")
-                    if pending:
-                        parts.append(f"- 未解决伏笔: {'; '.join(pending[:3])}")
-
-                # 关系
-                if self._graph and hasattr(self._graph, 'relationship_edges'):
-                    rels = []
-                    for edge in self._graph.relationship_edges:
-                        if edge.from_char == name:
-                            rels.append(f"对{edge.to_char}: {edge.relation_type}")
-                        elif edge.to_char == name:
-                            rels.append(f"被{edge.from_char}: {edge.relation_type}")
-                    if rels:
-                        parts.append(f"- 关系: {', '.join(rels[:5])}")
-
-                # 使用指引
-                if status in ("dead", "deceased", "killed"):
-                    parts.append("- ⚠️ 只能以回忆/闪回/他人提及出现")
-                elif status == "missing":
-                    parts.append("- ⚠️ 不能直接出场，只能通过线索暗示")
-                elif status == "arrested":
-                    parts.append("- ⚠️ 不能自由行动，仅限监狱/审讯场景")
-
-        # 注入角色约束
+        # 注入角色行为约束
         if self._character_profiles:
             parts.append("\n## 角色行为约束")
             for name, profile in self._character_profiles.items():
@@ -327,42 +144,258 @@ class ChapterWriter:
                 if hasattr(profile, 'boundary') and profile.boundary:
                     b = profile.boundary
                     if b.hard_rules:
-                        parts.append(f"- 硬底线: {', '.join(b.hard_rules)}")
-                if hasattr(profile, 'policy_anchors') and profile.policy_anchors:
-                    anchors = profile.policy_anchors
-                    if anchors:
-                        parts.append("- 行为参考:")
-                        for a in anchors[:3]:
-                            if hasattr(a, 'situation') and hasattr(a, 'action'):
-                                parts.append(f"  - {a.situation} → {a.action}")
+                        parts.append(f"- 硬底线: {', '.join(b.hard_rules[:3])}")
 
         return "\n".join(parts)
 
-    def _build_writer_user_prompt(self, outline: dict, extra_context: str = "") -> str:
-        """构建 user prompt（含大纲 + 前一章结尾 + 额外上下文）。"""
+    # ================================================================
+    # 流式接口（供 Pipeline 调用）
+    # ================================================================
+
+    async def inject(self, instruction: str):
+        """注入用户指令。触发 AgentFlow 中断。"""
+        self._inject_instruction = instruction
+        self._inject_event.set()
+
+    async def stream(self, outline: dict):
+        """流式生成章节内容。
+
+        AgentFlow ReAct 循环逐节写作，每节通过工具产出片段。
+        Pipeline 通过此 async generator 获取片段流。
+
+        Yields:
+            StoryFragment
+        """
+        from .fragment import StoryFragment
+
+        # 构建 user prompt
+        task = self._build_user_prompt(outline)
+        self._fragment_queue = asyncio.Queue()
+
+        # 启动 AgentFlow ReAct 循环（异步，结果通过 queue 流出）
+        run_task = asyncio.create_task(self._run_and_collect(task))
+
+        # 从 queue 中读取片段流
+        while True:
+            try:
+                item = await asyncio.wait_for(
+                    self._fragment_queue.get(), timeout=0.5,
+                )
+                if item is None:  # 结束标记
+                    break
+                yield item
+
+                # 检查注入信号
+                if self._inject_event.is_set():
+                    self._inject_event.clear()
+                    instruction = self._inject_instruction
+                    self._inject_instruction = ""
+                    # 注入指令作为新消息进入 AgentFlow 对话
+                    await self._built_agent.run(
+                        f"[用户指令] {instruction}\n请根据这个指令调整后续写作。"
+                    )
+                    # 后续片段会继续通过 queue 流出
+
+            except asyncio.TimeoutError:
+                if run_task.done():
+                    break
+
+        await run_task
+
+    async def _run_and_collect(self, task: str):
+        """运行 AgentFlow ReAct 循环，采集 write_section 产出的片段。"""
+        try:
+            result = await super().run(task)
+            # 标记结束
+            await self._fragment_queue.put(None)
+        except Exception as e:
+            logger.warning("ChapterWriter run error: %s", e)
+            await self._fragment_queue.put(None)
+
+    def _build_user_prompt(self, outline: dict) -> str:
+        """构建 user prompt（大纲 + 前一章结尾）。"""
         parts = [
-            "## 写作文本",
+            "## 续写任务",
             f"章节: 第 {outline.get('chapter_number', '?')} 章「{outline.get('title', '')}」",
             f"梗概: {outline.get('synopsis', '')}",
         ]
 
         structure = outline.get("structure", {})
         if structure:
-            parts.append(f"开篇: {structure.get('opening', '')}")
-            parts.append(f"推进: {structure.get('rising', '')}")
-            parts.append(f"高潮: {structure.get('climax', '')}")
-            parts.append(f"钩子: {structure.get('hook', '')}")
+            parts.append("\n## 章节结构（逐节写作）")
+            parts.append(f"第一节 - opening: {structure.get('opening', '')}")
+            parts.append(f"第二节 - rising: {structure.get('rising', '')}")
+            parts.append(f"第三节 - climax: {structure.get('climax', '')}")
+            parts.append(f"第四节 - hook: {structure.get('hook', '')}")
 
-        plot_advanced = outline.get("plot_threads_advanced", [])
-        if plot_advanced:
-            parts.append(f"推进伏笔: {', '.join(plot_advanced)}")
+        parts.append("\n按节点顺序逐节写作。每写完一节后检查是否需要查询角色信息。")
 
         if self._previous_chapter_ending:
             ending = self._previous_chapter_ending
-            parts.append(f"\n## 前一章结尾\n{ending[-2000:] if len(ending) > 2000 else ending}")
+            parts.append(f"\n## 前一章结尾（叙事衔接）")
+            parts.append(ending[-1500:] if len(ending) > 1500 else ending)
 
-        if extra_context:
-            parts.append(f"\n{extra_context}")
-
-        parts.append("\n现在从上一章结尾的自然衔接点开始续写。直接输出 StoryFragment JSON 序列。")
         return "\n".join(parts)
+
+    # ================================================================
+    # ReAct 工具
+    # ================================================================
+
+    def _build_tools(self) -> list:
+        ctx = self._ctx
+        kg = self._kg
+        graph = self._graph
+        char_profiles = self._character_profiles
+        char_statuses = self._character_statuses
+        style_profile = self._style_profile
+        previous_ending = self._previous_chapter_ending
+        queue = self._fragment_queue
+
+        @tool
+        def lookup_character(name: str) -> str:
+            """查询角色的当前状态、关系和关键事件。
+
+            当需要写某个角色但不清楚其最新状态时调用。
+            不会一次性加载所有角色，而是按需查询。
+
+            Args:
+                name: 角色名
+
+            Returns:
+                角色的 KG 信息摘要
+            """
+            if not graph:
+                return f"KG 不可用，无法查询 {name}"
+
+            person = graph.get_person_node(name) if hasattr(graph, 'get_person_node') else None
+            if not person:
+                return f"KG 中未找到角色「{name}」"
+
+            lines = [
+                f"角色: {name}",
+                f"状态: {person.status}",
+                f"身份: {person.role_type}",
+                f"派系: {person.faction}",
+                f"简介: {person.description or '无'}",
+            ]
+
+            # 最后参与的事件
+            if hasattr(graph, 'character_events'):
+                events = graph.character_events(name)
+                if events:
+                    last = events[-1]
+                    lines.append(f"\n最后事件（第{last.get('chapter_start','?')}章）: "
+                                 f"{last.get('name','?')} — {last.get('summary','')[:120]}")
+
+            # 关系
+            if hasattr(graph, 'relationship_edges'):
+                rels = []
+                for edge in graph.relationship_edges:
+                    if edge.from_char == name:
+                        rels.append(
+                            f"对{edge.to_char}: {edge.relation_type}"
+                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else "")
+                        )
+                    elif edge.to_char == name:
+                        rels.append(
+                            f"被{edge.from_char}: {edge.relation_type}"
+                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else "")
+                        )
+                if rels:
+                    lines.append(f"\n关系: {'; '.join(rels[:5])}")
+
+            # 状态硬约束提示
+            status = char_statuses.get(name, person.status)
+            if status in ("dead", "deceased", "killed"):
+                lines.append("\n⚠️ 此角色已死亡！只能以回忆/闪回/他人提及出现。")
+            elif status == "missing":
+                lines.append("\n⚠️ 此角色下落不明！不能直接出场。")
+
+            # Voice 约束
+            profile = char_profiles.get(name)
+            if profile and hasattr(profile, 'voice') and profile.voice:
+                v = profile.voice
+                if v.summary:
+                    lines.append(f"Voice: {v.summary}")
+
+            return "\n".join(lines)
+
+        @tool
+        def recall_foreshadowing() -> str:
+            """查询 KG 中所有未解决的伏笔和因果链。
+
+            当需要推进情节但不确定有哪些未完成线索时调用。
+
+            Returns:
+                未解决伏笔列表
+            """
+            if not graph:
+                return "KG 不可用"
+
+            # 因果链
+            hanging = []
+            for edge in graph.event_relation_edges:
+                if edge.relation_type == "causes":
+                    ev = graph.get_event_node(
+                        edge.from_event.split(":", 1)[-1]
+                    ) if hasattr(graph, 'get_event_node') else None
+                    if ev and ev.effect:
+                        hanging.append(
+                            f"「{ev.name}」(第{ev.chapter_start}章): {ev.effect[:100]}"
+                        )
+
+            if not hanging:
+                return "KG 中暂无未解决伏笔记录"
+
+            return "未解决伏笔:\n" + "\n".join(
+                f"- {h}" for h in hanging[:10]
+            )
+
+        @tool
+        def write_section(section_name: str, goal: str) -> str:
+            """写一个章节段落。
+
+            根据大纲中本节的 goal 来写。每节 3-6 个 StoryFragment。
+            写完后自然结束（不要再嵌套调用工具）。
+
+            Args:
+                section_name: 段落名（opening/rising/climax/hook）
+                goal: 本节要完成的叙事目标
+
+            Returns:
+                已写的片段数量
+            """
+            # 这个方法只是一个标记——AgentFlow LLM 会在自然终止时输出内容
+            # 实际的片段解析由 _on_post_turn 完成
+            return f"开始写 {section_name}: {goal[:100]}"
+
+        return [
+            lookup_character,
+            recall_foreshadowing,
+            write_section,
+        ]
+
+    # ================================================================
+    # Post-turn: 从 LLM 自然终止输出中提取 StoryFragment
+    # ================================================================
+
+    def _on_post_turn(self, user_msg: str, assistant_msg: str):
+        """从 AgentFlow 自然终止输出中解析 StoryFragment。"""
+        from .fragment import StoryFragment
+
+        if not assistant_msg:
+            return
+
+        # AgentFlow 自然终止时，assistant_msg 是 LLM 直接输出的文本
+        # 尝试按行解析 JSON fragment
+        for line in assistant_msg.strip().split("\n"):
+            line = line.strip()
+            if not line or not line.startswith("{"):
+                continue
+            fragment = StoryFragment.parse_stream_line(line)
+            if fragment:
+                # 同步放入队列（_on_post_turn 在 run 内同步调用）
+                try:
+                    self._fragment_queue.put_nowait(fragment)
+                except asyncio.QueueFull:
+                    pass
