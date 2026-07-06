@@ -230,8 +230,8 @@ class ContinuationPipeline:
         if not mentioned:
             return
 
-        print(f"  [Verify] 现场验证 {len(mentioned)} 个角色的状态...",
-              end=" ", flush=True)
+        names = [p.name for p in mentioned]
+        print(f"  [Verify] 现场验证 {len(mentioned)} 个角色: {', '.join(names)}")
 
         novel_text = self._get_novel_text()
         if not novel_text:
@@ -247,11 +247,15 @@ class ContinuationPipeline:
             # 规则：定位该角色最后出场的章节
             appeared = self._find_chapters_by_name(name, chapters)
             if not appeared:
-                self._status_verified.add(name)  # 未找到也标记，避免反复扫
+                self._status_verified.add(name)
+                print(f"    {name}: 未在原文中找到出场章节")
                 continue
 
             # 取最后 3 章的文本 + 角色名周围上下文
             last_chapters = sorted(appeared)[-3:]
+            print(f"    {name}: 定位最后出场章节 {last_chapters} → LLM 分析中...",
+                  end=" ", flush=True)
+
             last_text = "\n".join(chapters.get(ch, "") for ch in last_chapters)
             context = self._extract_name_context(name, last_text)
 
@@ -264,11 +268,14 @@ class ContinuationPipeline:
             if resolved:
                 old = person.status
                 if resolved != old:
-                    print(
-                        f"  [KG Fix] {name}: {old} → {resolved} "
-                        f"(章节 {last_chapters[-1]})"
-                    )
+                    print(f"{old} → {resolved}")
+                    print(f"  [KG Fix] {name}: {old} → {resolved} "
+                          f"(章节 {last_chapters[-1]})")
+                else:
+                    print(f"确认 {resolved}（与 KG 一致）")
                 person._status = resolved  # 直接修正 KG
+            else:
+                print("无法确定（LLM 返回空）")
 
     def _llm_resolve_status(self, name: str, context: str,
                             last_chapter: int) -> str:
