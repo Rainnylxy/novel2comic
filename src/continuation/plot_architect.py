@@ -306,8 +306,8 @@ class PlotArchitect(BaseAgent):
                 result = llm.chat_json(
                     system_prompt=(
                         "你是专业的小说章节结构设计师。"
-                        "基于给定的伏笔、角色节拍和文风约束，设计一章完整的叙事结构。"
-                        "包括: opening(开篇锚定), rising(推进), climax(高潮), hook(章尾钩子)。"
+                        "基于给定的伏笔、角色节拍和文风约束，将一章拆分为 4-6 个详细小节。"
+                        "每个小节是 Chapter Writer 的一次写作任务。"
                         "只返回 JSON。"
                     ),
                     user_prompt=(
@@ -315,13 +315,21 @@ class PlotArchitect(BaseAgent):
                         f"## 角色节拍 & 伏笔\n{arc_spec}\n\n"
                         f"## 前一章结尾\n{prev_ending[-1500:]}\n\n"
                         + (f"## 用户指令\n{instruction}\n\n" if instruction else "")
-                        + f"为第 {last_ch + 1} 章设计结构。返回 JSON:\n"
+                        + f"为第 {last_ch + 1} 章设计 4-6 个小节。返回 JSON:\n"
                           f'{{"chapter_number": {last_ch + 1}, "title": "...", '
-                          f'"synopsis": "...", "structure": {{"opening": "...", '
-                          f'"rising": "...", "climax": "...", "hook": "..."}}, '
+                          f'"synopsis": "...", '
+                          f'"sections": [\n'
+                          f'  {{"name": "opening", "goal": "本节叙事目标（50字内）", '
+                          f'"characters": ["出场角色名"], "tone": "冷峻/紧张/温暖...", '
+                          f'"key_beats": ["情节点1", "情节点2"], '
+                          f'"target_fragments": 5}},\n'
+                          f'  {{"name": "rising_1", "goal": "...", "characters": [...], '
+                          f'"tone": "...", "key_beats": [...], "target_fragments": 6}},\n'
+                          f'  ...\n'
+                          f'],'
                           f'"plot_threads_advanced": ["..."], '
                           f'"plot_threads_introduced": ["..."], '
-                          f'"tone": "...", "target_word_count": 3000}}'
+                          f'"tone": "..."}}'
                     ),
                     temperature=0.6,
                     max_tokens=2048,
@@ -337,16 +345,23 @@ class PlotArchitect(BaseAgent):
                 "chapter_number": last_ch + 1,
                 "title": "续",
                 "synopsis": "继续推进故事",
-                "structure": {
-                    "opening": "衔接上一章结尾",
-                    "rising": "推进现有冲突",
-                    "climax": "关键转折",
-                    "hook": "悬念钩子",
-                },
+                "sections": [
+                    {"name": "opening", "goal": "衔接上一章结尾，锚定场景",
+                     "characters": [], "tone": "保持原作风格",
+                     "key_beats": ["场景锚定", "引入本章冲突"], "target_fragments": 5},
+                    {"name": "rising", "goal": "推进冲突，揭示线索",
+                     "characters": [], "tone": "保持原作风格",
+                     "key_beats": ["冲突升级", "线索揭示"], "target_fragments": 6},
+                    {"name": "climax", "goal": "关键转折",
+                     "characters": [], "tone": "保持原作风格",
+                     "key_beats": ["高潮"], "target_fragments": 5},
+                    {"name": "hook", "goal": "章尾悬念钩子",
+                     "characters": [], "tone": "保持原作风格",
+                     "key_beats": ["悬念设置"], "target_fragments": 3},
+                ],
                 "plot_threads_advanced": [],
                 "plot_threads_introduced": [],
                 "tone": "保持原作风格",
-                "target_word_count": 3000,
                 "status": "ok",
             }, ensure_ascii=False)
 

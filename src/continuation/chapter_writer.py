@@ -43,7 +43,9 @@ class ChapterWriter(BaseAgent):
         self._kg = services.kg
 
         # 运行时上下文
-        self._outline: dict = {}
+        self._section: dict = {}
+        self._section_index: int = 0
+        self._total_sections: int = 1
         self._style_profile = None
         self._previous_chapter_ending: str = ""
         self._character_profiles: dict = {}
@@ -62,39 +64,51 @@ class ChapterWriter(BaseAgent):
 
     def set_context(
         self,
-        outline: dict,
+        section: dict,
+        section_index: int,
+        total_sections: int,
         style_profile,
         previous_chapter_ending: str,
         character_profiles: dict,
         character_statuses: dict = None,
         graph=None,
     ):
-        """设置 Writer 运行时上下文，构建 System Prompt。"""
-        self._outline = outline
+        """设置 Writer 运行时上下文 —— 每次只写一个小节。
+
+        Args:
+            section: {name, goal, characters, tone, key_beats, target_fragments}
+            section_index: 当前是第几节（0-based）
+            total_sections: 总共几节
+            style_profile: AuthorStyleProfile
+            previous_chapter_ending: 衔接文本
+            character_profiles: 角色蒸馏 Profile
+            character_statuses: 角色状态映射
+            graph: StoryGraph（Writer 用它按需查询角色信息）
+        """
+        self._section = section
+        self._section_index = section_index
+        self._total_sections = total_sections
         self._style_profile = style_profile
         self._previous_chapter_ending = previous_chapter_ending
         self._character_profiles = character_profiles or {}
         self._character_statuses = character_statuses or {}
         self._graph = graph
 
-        # 构建 system prompt（会被 AgentFlow 缓存，不随每轮对话变化）
+        # 构建 system prompt（会被 AgentFlow 缓存，不随每节变化）
         self.set_identity(self._build_system_prompt())
 
     def _build_system_prompt(self) -> str:
-        """构建 Writer 的 system prompt。"""
+        """构建 Writer 的 system prompt（每节共用，缓存）。"""
         parts = [
             "## 角色",
-            "你是专业小说续写者。你需要根据大纲逐节续写小说内容。",
-            "每节写完后，检查是否需要 lookup_character 或 recall_foreshadowing，",
-            "然后再写下一节。不要一次性写完所有内容。",
+            "你是专业小说续写者。每次调用你只写一个小节（3-6个 StoryFragment）。",
             "",
             "## 工作流程",
-            "1. 阅读大纲 → 理解本节目标",
-            "2. 如果有不熟悉的角色 → lookup_character",
-            "3. 如果需要伏笔参考 → recall_foreshadowing",
-            "4. write_section 写本节内容",
-            "5. 重复 1-4 直到全部完成",
-            "6. 自然终止（不要调用工具，直接输出完成摘要）",
+            "1. 阅读本节目标和情节点",
+            "2. 如有不熟悉的角色 → lookup_character",
+            "3. 如有伏笔需要 → recall_foreshadowing",
+            "4. 写本节内容（3-6 个 StoryFragment JSON）",
+            "5. 自然终止 —— 不要嵌套调用工具",
             "",
             "## 输出格式",
             "write_section 工具输出的 text 字段直接以 StoryFragment JSON 格式逐行输出:",
@@ -157,19 +171,18 @@ class ChapterWriter(BaseAgent):
         self._inject_instruction = instruction
         self._inject_event.set()
 
-    async def stream(self, outline: dict):
-        """流式生成章节内容。
+    async def stream(self, section: dict):
+        """流式生成一个小节的内容。
 
-        AgentFlow ReAct 循环逐节写作，每节通过工具产出片段。
-        Pipeline 通过此 async generator 获取片段流。
+        AgentFlow ReAct 循环写本节。Pipeline 逐节调用此方法。
 
         Yields:
             StoryFragment
         """
         from .fragment import StoryFragment
 
-        # 构建 user prompt
-        task = self._build_user_prompt(outline)
+        # 构建 user prompt（只包含本节信息）
+        task = self._build_user_prompt(section)
         self._fragment_queue = asyncio.Queue()
 
         # 启动 AgentFlow ReAct 循环（异步，结果通过 queue 流出）
@@ -212,28 +225,41 @@ class ChapterWriter(BaseAgent):
             logger.warning("ChapterWriter run error: %s", e)
             await self._fragment_queue.put(None)
 
-    def _build_user_prompt(self, outline: dict) -> str:
-        """构建 user prompt（大纲 + 前一章结尾）。"""
+    def _build_user_prompt(self, section: dict) -> str:
+        """构建 user prompt —— 只包含当前一节的信息。"""
         parts = [
-            "## 续写任务",
-            f"章节: 第 {outline.get('chapter_number', '?')} 章「{outline.get('title', '')}」",
-            f"梗概: {outline.get('synopsis', '')}",
+            f"## 写作任务: {section.get('name', '')}",
+            f"你在写第 {self._section_index + 1}/{self._total_sections} 节",
+            f"叙事目标: {section.get('goal', '')}",
         ]
 
-        structure = outline.get("structure", {})
-        if structure:
-            parts.append("\n## 章节结构（逐节写作）")
-            parts.append(f"第一节 - opening: {structure.get('opening', '')}")
-            parts.append(f"第二节 - rising: {structure.get('rising', '')}")
-            parts.append(f"第三节 - climax: {structure.get('climax', '')}")
-            parts.append(f"第四节 - hook: {structure.get('hook', '')}")
+        # 基调
+        tone = section.get("tone", "")
+        if tone:
+            parts.append(f"基调: {tone}")
 
-        parts.append("\n按节点顺序逐节写作。每写完一节后检查是否需要查询角色信息。")
+        # 本节出场角色
+        characters = section.get("characters", [])
+        if characters:
+            parts.append(f"\n本节主要角色: {', '.join(characters)}")
+            parts.append("如需了解这些角色的最新状态，请调用 lookup_character。")
 
+        # 情节点
+        key_beats = section.get("key_beats", [])
+        if key_beats:
+            parts.append(f"\n本节需要覆盖的情节点:")
+            for beat in key_beats:
+                parts.append(f"  - {beat}")
+
+        # 目标片段数
+        target = section.get("target_fragments", 5)
+        parts.append(f"\n目标: 写 {target} 个 StoryFragment JSON 片段后自然终止。")
+
+        # 衔接文本
         if self._previous_chapter_ending:
             ending = self._previous_chapter_ending
-            parts.append(f"\n## 前一章结尾（叙事衔接）")
-            parts.append(ending[-1500:] if len(ending) > 1500 else ending)
+            parts.append(f"\n## 衔接上下文")
+            parts.append(ending[-800:] if len(ending) > 800 else ending)
 
         return "\n".join(parts)
 
