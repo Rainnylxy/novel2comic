@@ -83,7 +83,7 @@ class PlotArchitect(BaseAgent):
 
         lines = [
             f"## 续写上下文",
-            f"当前已写至第 {ctx['last_chapter']} 章。你需要为第 {ctx['last_chapter'] + 1} 章规划大纲。",
+            f"原文已写至第 {ctx['last_chapter']} 章。你需要规划接下来的故事弧线（3-5 章）。",
         ]
 
         if ctx.get("user_instruction"):
@@ -127,7 +127,7 @@ class PlotArchitect(BaseAgent):
             if task:
                 task = prefix + "\n\n" + task
             else:
-                task = prefix + "\n\n用户任务: 为下一章规划大纲。请依次调用 analyze_hanging_threads → sketch_character_beats → plan_structure。"
+                task = prefix + "\n\n任务: 规划一个 3-5 章的故事弧线。依次调用 analyze_hanging_threads → sketch_character_beats → plan_arc。"
         result = await super().run(task)
         # Critical 1: AgentFlow 返回原始 str，契约要求 dict
         if isinstance(result, dict):
@@ -288,14 +288,17 @@ class PlotArchitect(BaseAgent):
             return json.dumps({"characters": fallback}, ensure_ascii=False)
 
         @tool
-        def plan_structure(arc_spec: str) -> str:
-            """生成章节结构：起承转合 + 章尾悬念钩子。
+        def plan_arc(arc_spec: str) -> str:
+            """规划 3-5 章的故事弧线，每章包含 3-6 个小节。
+
+            基于伏笔分析和角色节拍，设计连贯的多章叙事弧线。
+            每章有独立的主题，共同推进一个完整的故事段。
 
             Args:
                 arc_spec: 角色节拍和伏笔分析的 JSON 摘要
 
             Returns:
-                章节结构 JSON（opening, rising, climax, hook, 预估字数）
+                故事弧线 JSON（多章，每章多节）
             """
             style = outline_ctx.get("style_summary", "")
             prev_ending = outline_ctx.get("previous_chapter_ending", "")
@@ -305,31 +308,38 @@ class PlotArchitect(BaseAgent):
             try:
                 result = llm.chat_json(
                     system_prompt=(
-                        "你是专业的小说章节结构设计师。"
-                        "基于给定的伏笔、角色节拍和文风约束，将一章拆分为 4-6 个详细小节。"
-                        "每个小节是 Chapter Writer 的一次写作任务。"
+                        "你是专业的小说故事架构师。基于伏笔和角色节拍，"
+                        "规划一个 3-5 章的完整故事弧线。每章有独立主题，"
+                        "每章再拆分为 3-6 个小节供 Chapter Writer 逐节写作。"
                         "只返回 JSON。"
                     ),
                     user_prompt=(
                         f"## 文风约束\n{style}\n\n"
                         f"## 角色节拍 & 伏笔\n{arc_spec}\n\n"
-                        f"## 前一章结尾\n{prev_ending[-1500:]}\n\n"
+                        f"## 原文结尾\n{prev_ending[-1500:]}\n\n"
                         + (f"## 用户指令\n{instruction}\n\n" if instruction else "")
-                        + f"为第 {last_ch + 1} 章设计 4-6 个小节。返回 JSON:\n"
-                          f'{{"chapter_number": {last_ch + 1}, "title": "...", '
-                          f'"synopsis": "...", '
-                          f'"sections": [\n'
-                          f'  {{"name": "opening", "goal": "本节叙事目标（50字内）", '
-                          f'"characters": ["出场角色名"], "tone": "冷峻/紧张/温暖...", '
-                          f'"key_beats": ["情节点1", "情节点2"], '
+                        + f"从第 {last_ch + 1} 章开始，规划 3-5 章。返回 JSON:\n"
+                          f'{{\n'
+                          f'  "arc_title": "故事弧线名",\n'
+                          f'  "arc_synopsis": "整个弧线的梗概（100字内）",\n'
+                          f'  "chapters": [\n'
+                          f'    {{\n'
+                          f'      "chapter_number": {last_ch + 1},\n'
+                          f'      "title": "章节标题",\n'
+                          f'      "synopsis": "本章梗概（50字内）",\n'
+                          f'      "tone": "冷峻/紧张/悬疑...",\n'
+                          f'      "sections": [\n'
+                          f'        {{"name": "opening", "goal": "本节目标（30字内）", '
+                          f'"characters": ["角色名"], "key_beats": ["情节点"], '
                           f'"target_fragments": 5}},\n'
-                          f'  {{"name": "rising_1", "goal": "...", "characters": [...], '
-                          f'"tone": "...", "key_beats": [...], "target_fragments": 6}},\n'
-                          f'  ...\n'
-                          f'],'
-                          f'"plot_threads_advanced": ["..."], '
-                          f'"plot_threads_introduced": ["..."], '
-                          f'"tone": "..."}}'
+                          f'        ...\n'
+                          f'      ]\n'
+                          f'    }},\n'
+                          f'    ...\n'
+                          f'  ],\n'
+                          f'  "plot_threads_advanced": ["推进的伏笔"],\n'
+                          f'  "plot_threads_introduced": ["新引入的悬念"]\n'
+                          f'}}'
                     ),
                     temperature=0.6,
                     max_tokens=2048,
@@ -339,34 +349,34 @@ class PlotArchitect(BaseAgent):
                     result.setdefault("status", "ok")
                     return json.dumps(result, ensure_ascii=False)
             except Exception as e:
-                logger.warning("plan_structure LLM 调用失败，使用兜底方案: %s", e)
+                logger.warning("plan_arc LLM 调用失败，使用兜底方案: %s", e)
 
             return json.dumps({
-                "chapter_number": last_ch + 1,
-                "title": "续",
-                "synopsis": "继续推进故事",
-                "sections": [
-                    {"name": "opening", "goal": "衔接上一章结尾，锚定场景",
-                     "characters": [], "tone": "保持原作风格",
-                     "key_beats": ["场景锚定", "引入本章冲突"], "target_fragments": 5},
-                    {"name": "rising", "goal": "推进冲突，揭示线索",
-                     "characters": [], "tone": "保持原作风格",
-                     "key_beats": ["冲突升级", "线索揭示"], "target_fragments": 6},
-                    {"name": "climax", "goal": "关键转折",
-                     "characters": [], "tone": "保持原作风格",
-                     "key_beats": ["高潮"], "target_fragments": 5},
-                    {"name": "hook", "goal": "章尾悬念钩子",
-                     "characters": [], "tone": "保持原作风格",
-                     "key_beats": ["悬念设置"], "target_fragments": 3},
-                ],
+                "arc_title": "续",
+                "arc_synopsis": "继续推进故事",
+                "chapters": [{
+                    "chapter_number": last_ch + 1,
+                    "title": "续",
+                    "synopsis": "继续推进故事",
+                    "tone": "保持原作风格",
+                    "sections": [
+                        {"name": "opening", "goal": "衔接上一章结尾",
+                         "characters": [], "key_beats": ["开场"], "target_fragments": 5},
+                        {"name": "rising", "goal": "推进冲突",
+                         "characters": [], "key_beats": ["推进"], "target_fragments": 6},
+                        {"name": "climax", "goal": "关键转折",
+                         "characters": [], "key_beats": ["高潮"], "target_fragments": 5},
+                        {"name": "hook", "goal": "章尾悬念",
+                         "characters": [], "key_beats": ["悬念"], "target_fragments": 3},
+                    ],
+                }],
                 "plot_threads_advanced": [],
                 "plot_threads_introduced": [],
-                "tone": "保持原作风格",
                 "status": "ok",
             }, ensure_ascii=False)
 
         return [
             analyze_hanging_threads,
             sketch_character_beats,
-            plan_structure,
+            plan_arc,
         ]

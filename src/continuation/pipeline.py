@@ -532,55 +532,69 @@ class ContinuationPipeline:
         self._verify_characters_in_text(outline_text)
         yield PipelineEvent("outline", outline)
 
-        # —— 阶段 2: 写作（逐节调度） ——
+        # —— 阶段 2: 写作（逐章逐节调度） ——
         self._phase = "writing"
-        sections = outline.get("sections", [])
-        if not sections:
-            # 兼容旧格式
-            structure = outline.get("structure", {})
-            sections = [
-                {"name": k, "goal": v, "characters": [], "tone": outline.get("tone", ""),
-                 "key_beats": [], "target_fragments": 5}
-                for k, v in structure.items()
-            ]
-        print(f"[Phase 2/4] 逐节写作 — {len(sections)} 个小节")
+        chapters = outline.get("chapters", [])
+        if not chapters:
+            # 兼容旧格式：单章
+            chapters = [outline]
+        arc_title = outline.get("arc_title", "")
+        if arc_title:
+            print(f"[Phase 2/4] 故事弧线「{arc_title}」— {len(chapters)} 章")
+        else:
+            print(f"[Phase 2/4] 写作 — {len(chapters)} 章")
         yield PipelineEvent("phase", {"phase": "writing"})
 
         draft_fragments = []
-        for i, section in enumerate(sections):
-            section_name = section.get("name", f"section_{i}")
-            print(f"  [写 {i+1}/{len(sections)}] {section_name}: "
-                  f"{section.get('goal', '')[:60]}")
+        for ch_idx, chapter in enumerate(chapters):
+            ch_num = chapter.get("chapter_number", self._chapter + ch_idx + 1)
+            ch_title = chapter.get("title", "")
+            sections = chapter.get("sections", [])
+            if not sections:
+                sections = [{"name": "main", "goal": chapter.get("synopsis", ""),
+                             "characters": [], "key_beats": [], "target_fragments": 15}]
 
-            # 按需验证本节涉及的角色
-            section_text = json.dumps(section, ensure_ascii=False)
-            self._verify_characters_in_text(section_text)
+            print(f"\n  [第{ch_num}章「{ch_title}」] {len(sections)} 个小节")
+            # 推送章节分隔
+            yield PipelineEvent("fragment", {
+                "type": "divider", "text": "",
+                "divider_label": f"第{ch_num}章「{ch_title}」"
+            })
 
-            # 每节重新 set_context —— 只包含本节信息
-            self.writer.set_context(
-                section=section,
-                section_index=i,
-                total_sections=len(sections),
-                style_profile=self._style_profile,
-                previous_chapter_ending=self._previous_chapter_ending
-                    if i == 0 else "",  # 只有第一节需要前一章衔接
-                character_profiles=self._character_profiles,
-                character_statuses=self._get_character_statuses(),
-                graph=self._ctx.novel.story_graph if self._ctx.novel else None,
-            )
+            for i, section in enumerate(sections):
+                section_name = section.get("name", f"section_{i}")
+                print(f"    [{i+1}/{len(sections)}] {section_name}: "
+                      f"{section.get('goal', '')[:50]}")
 
-            async for fragment in self.writer.stream(section):
-                draft_fragments.append(fragment)
-                self._fragment_count += 1
-                yield PipelineEvent("fragment", fragment.to_dict())
+                # 按需验证本节涉及的角色
+                section_text = json.dumps(section, ensure_ascii=False)
+                self._verify_characters_in_text(section_text)
 
-            # 更新"前一节结尾"作为下一节的衔接
-            if draft_fragments:
-                recent = draft_fragments[-3:]
-                self._previous_chapter_ending = "\n".join(
-                    f"[{f.type}] {f.character + ': ' if f.character else ''}{f.text}"
-                    for f in recent
+                self.writer.set_context(
+                    section=section,
+                    section_index=i,
+                    total_sections=len(sections),
+                    style_profile=self._style_profile,
+                    previous_chapter_ending=self._previous_chapter_ending
+                        if (ch_idx == 0 and i == 0) else "",
+                    character_profiles=self._character_profiles,
+                    character_statuses=self._get_character_statuses(),
+                    graph=self._ctx.novel.story_graph
+                        if self._ctx.novel else None,
                 )
+
+                async for fragment in self.writer.stream(section):
+                    draft_fragments.append(fragment)
+                    self._fragment_count += 1
+                    yield PipelineEvent("fragment", fragment.to_dict())
+
+                # 更新衔接上下文
+                if draft_fragments:
+                    recent = draft_fragments[-3:]
+                    self._previous_chapter_ending = "\n".join(
+                        f"[{f.type}] {f.character + ': ' if f.character else ''}{f.text}"
+                        for f in recent
+                    )
 
         # —— 阶段 3: 审校 ——
         self._phase = "reviewing"
@@ -662,24 +676,22 @@ class ContinuationPipeline:
 
         # Fallback
         return {
-            "chapter_number": self._chapter + 1,
-            "title": "",
-            "synopsis": "继续推进故事",
-            "sections": [
-                {"name": "opening", "goal": "衔接上一章，引入场景",
-                 "characters": [], "tone": "保持原作风格",
-                 "key_beats": ["锚定场景"], "target_fragments": 5},
-                {"name": "rising", "goal": "推进冲突",
-                 "characters": [], "tone": "保持原作风格",
-                 "key_beats": ["冲突升级"], "target_fragments": 5},
-                {"name": "climax", "goal": "关键转折",
-                 "characters": [], "tone": "保持原作风格",
-                 "key_beats": ["高潮"], "target_fragments": 5},
-                {"name": "hook", "goal": "章尾悬念",
-                 "characters": [], "tone": "保持原作风格",
-                 "key_beats": ["悬念"], "target_fragments": 3},
-            ],
-            "tone": "保持原作风格",
+            "chapters": [{
+                "chapter_number": self._chapter + 1,
+                "title": "续",
+                "synopsis": "继续推进故事",
+                "tone": "保持原作风格",
+                "sections": [
+                    {"name": "opening", "goal": "衔接上一章", "characters": [],
+                     "key_beats": ["开场"], "target_fragments": 5},
+                    {"name": "rising", "goal": "推进冲突", "characters": [],
+                     "key_beats": ["推进"], "target_fragments": 5},
+                    {"name": "climax", "goal": "关键转折", "characters": [],
+                     "key_beats": ["高潮"], "target_fragments": 5},
+                    {"name": "hook", "goal": "章尾悬念", "characters": [],
+                     "key_beats": ["悬念"], "target_fragments": 3},
+                ],
+            }],
             "status": "parsed_fallback",
         }
 
