@@ -60,8 +60,6 @@ class ContinuationPipeline:
         self._status_verified: set = set()
         # 验证修正的状态（待持久化）
         self._status_fixes: dict = {}
-        # 角色档案（现场验证后的完整信息：结局、伏笔、关系）
-        self._character_dossiers: dict = {}
 
         # 缓存数据
         self._style_profile = None
@@ -142,11 +140,6 @@ class ContinuationPipeline:
                         print(f"  [KG Fix] {p.name}: {p.status} → {fixed} (从缓存恢复)")
                         p._status = fixed
             print(f"  [KG] 从缓存恢复 {len(self._status_fixes)} 个状态修正")
-
-        # 加载之前验证过的角色档案（结局/伏笔/关系）
-        self._character_dossiers = self._load_character_dossiers()
-        if self._character_dossiers:
-            print(f"  [Dossier] 从缓存加载 {len(self._character_dossiers)} 个角色档案")
 
         # 3. 蒸馏文风 Profile（优先读缓存）
         distiller = AuthorStyleDistiller(self._llm)
@@ -299,17 +292,14 @@ class ContinuationPipeline:
                     print(f"  [KG Fix] {name}: {old} → {resolved}")
                 else:
                     print(f"确认 {resolved}" + (f" — {ending[:40]}" if ending else ""))
-                person._status = resolved
+                person._status = resolved  # 修正 KG PersonNode
                 self._status_fixes[name] = resolved
-                self._character_dossiers[name] = dossier  # 存档，供 Writer 使用
             else:
                 print("无法确定（LLM 返回空）")
 
-        # 持久化修正到磁盘（下次启动自动加载）
+        # 持久化状态修正到磁盘（下次启动自动加载）
         if self._status_fixes:
             self._save_status_fixes()
-        if self._character_dossiers:
-            self._save_character_dossiers()
 
     def _load_status_fixes(self) -> dict:
         """加载之前验证过的状态修正。"""
@@ -334,32 +324,6 @@ class ContinuationPipeline:
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(self._status_fixes, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-    def _load_character_dossiers(self) -> dict:
-        """加载之前验证过的角色档案（结局/伏笔/关系）。"""
-        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
-        if not project_dir:
-            return {}
-        path = os.path.join(project_dir, "character_dossiers.json")
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return {}
-
-    def _save_character_dossiers(self):
-        """持久化角色档案到项目目录。"""
-        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
-        if not project_dir:
-            return
-        path = os.path.join(project_dir, "character_dossiers.json")
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(self._character_dossiers, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 
@@ -579,7 +543,7 @@ class ContinuationPipeline:
             previous_chapter_ending=self._previous_chapter_ending,
             character_profiles=self._character_profiles,
             character_statuses=self._get_character_statuses(),
-            character_dossiers=self._character_dossiers,
+            graph=self._ctx.novel.story_graph if self._ctx.novel else None,
         )
 
         draft_fragments = []

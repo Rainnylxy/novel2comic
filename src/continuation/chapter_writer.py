@@ -51,8 +51,8 @@ class ChapterWriter:
         self._style_profile = None
         self._previous_chapter_ending: str = ""
         self._character_profiles: dict = {}
-        self._character_statuses: dict = {}  # {name: status}  from KG
-        self._character_dossiers: dict = {}  # {name: {status,ending,foreshadowing,...}}
+        self._character_statuses: dict = {}  # {name: status}
+        self._graph = None  # StoryGraph，用于查询角色档案
 
     def set_context(
         self,
@@ -61,7 +61,7 @@ class ChapterWriter:
         previous_chapter_ending: str,
         character_profiles: dict,
         character_statuses: dict = None,
-        character_dossiers: dict = None,
+        graph=None,
     ):
         """设置 Writer 运行时上下文。"""
         self._outline = outline
@@ -69,7 +69,7 @@ class ChapterWriter:
         self._previous_chapter_ending = previous_chapter_ending
         self._character_profiles = character_profiles
         self._character_statuses = character_statuses or {}
-        self._character_dossiers = character_dossiers or {}
+        self._graph = graph
 
     async def inject(self, instruction: str):
         """注入用户指令。触发当前流中断并重连。
@@ -265,28 +265,53 @@ class ChapterWriter:
                 parts.append(f"以下角色**下落不明**: {', '.join(missing_chars)}")
                 parts.append("下落不明角色不能直接出现，只能通过线索或他人转述提及。")
 
-        # 注入角色背景档案（结局 + 伏笔）
-        if self._character_dossiers:
-            parts.append("\n## 角色背景档案（从原文现场分析，用于续写时的故事连贯性）")
-            for name, d in self._character_dossiers.items():
-                status = d.get("status", "?")
-                ending = d.get("ending", "")
-                foreshadowing = d.get("foreshadowing", "")
-                relationships = d.get("key_relationships", "")
+        # 注入角色背景档案（从 KG 组装：PersonNode.status + EventNode.cause/effect + RelationshipEdge）
+        if self._character_statuses and self._graph:
+            parts.append("\n## 角色背景档案（来自 KG，用于续写故事连贯性）")
+            for name, status in self._character_statuses.items():
+                person = self._graph.get_person_node(name) if self._graph else None
                 parts.append(f"\n### {name}（状态: {status}）")
-                if ending:
-                    parts.append(f"- 结局: {ending}")
-                if foreshadowing and foreshadowing != "无":
-                    parts.append(f"- 未解决伏笔: {foreshadowing}")
-                if relationships:
-                    parts.append(f"- 关键关系: {relationships}")
+
+                # 结局：查询该角色最后参与的事件
+                if self._graph and hasattr(self._graph, 'character_events'):
+                    events = self._graph.character_events(name)
+                    if events:
+                        last_event = events[-1]
+                        parts.append(f"- 最后事件: {last_event.get('name', '?')}"
+                                     f"（第{last_event.get('chapter_start','?')}章）: "
+                                     f"{last_event.get('summary', '')[:100]}")
+
+                # 伏笔：查询 KG 中以该角色为 cause 的因果链
+                if self._graph and hasattr(self._graph, 'event_relation_edges'):
+                    pending = []
+                    for edge in self._graph.event_relation_edges:
+                        if edge.relation_type == "causes":
+                            ev = self._graph.get_event_node(
+                                edge.from_event.split(":", 1)[-1]
+                            ) if hasattr(self._graph, 'get_event_node') else None
+                            if ev and name in (ev.cause or ""):
+                                pending.append(f"「{ev.name}」→ {edge.to_event}")
+                    if pending:
+                        parts.append(f"- 未解决伏笔: {'; '.join(pending[:3])}")
+
+                # 关系
+                if self._graph and hasattr(self._graph, 'relationship_edges'):
+                    rels = []
+                    for edge in self._graph.relationship_edges:
+                        if edge.from_char == name:
+                            rels.append(f"对{edge.to_char}: {edge.relation_type}")
+                        elif edge.to_char == name:
+                            rels.append(f"被{edge.from_char}: {edge.relation_type}")
+                    if rels:
+                        parts.append(f"- 关系: {', '.join(rels[:5])}")
+
                 # 使用指引
                 if status in ("dead", "deceased", "killed"):
-                    parts.append("- ⚠️ 使用方式: 只能以回忆/闪回/他人提及出现。利用其'结局'和'伏笔'作为故事背景。")
+                    parts.append("- ⚠️ 只能以回忆/闪回/他人提及出现")
                 elif status == "missing":
-                    parts.append("- ⚠️ 使用方式: 不能直接出场。可在他人的对话或线索中暗示其存在。")
+                    parts.append("- ⚠️ 不能直接出场，只能通过线索暗示")
                 elif status == "arrested":
-                    parts.append("- ⚠️ 使用方式: 不能自由行动。可在监狱/审讯场景中出现，或通过律师/探监等方式间接参与。")
+                    parts.append("- ⚠️ 不能自由行动，仅限监狱/审讯场景")
 
         # 注入角色约束
         if self._character_profiles:
