@@ -495,6 +495,16 @@
           revising:  '修订中...'
         };
         setStatus(labels[data.phase] || data.phase, 'active');
+        // 只在写作阶段允许注入指令
+        if (data.phase === 'writing') {
+          injectBtn.disabled = false;
+          injectInput.disabled = false;
+          injectInput.placeholder = '💬 输入指令调整续写方向...';
+        } else {
+          injectBtn.disabled = true;
+          injectInput.disabled = true;
+          injectInput.placeholder = '等待进入写作阶段...';
+        }
         break;
 
       case 'outline':
@@ -643,15 +653,16 @@
         console.error('Inject failed:', result.error || result.status);
         setStatus('指令发送失败', 'error');
       } else {
-        setStatus('指令已发送', 'active');
-        injectBtn.disabled = true;
-        injectInput.disabled = true;
+        setStatus('指令已发送 ✓ — 等待新的片段...', 'active');
+        // 不 disable — 写作阶段允许继续注入
       }
     } catch (err) {
       console.error('Inject error:', err);
-      setStatus('指令发送失败', 'error');
+      setStatus('指令发送失败: ' + err.message, 'error');
+    } finally {
       injectBtn.disabled = false;
       injectInput.disabled = false;
+      injectInput.focus();
     }
   }
 
