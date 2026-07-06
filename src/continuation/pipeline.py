@@ -58,6 +58,8 @@ class ContinuationPipeline:
 
         # 角色状态验证标记：已验证过的角色不再重复验证
         self._status_verified: set = set()
+        # 验证修正的状态（待持久化回 novel.json）
+        self._status_fixes: dict = {}
 
         # 缓存数据
         self._style_profile = None
@@ -126,6 +128,18 @@ class ContinuationPipeline:
                   f"{graph.total_edge_count} 条边")
 
         graph = self._ctx.novel.story_graph
+
+        # 加载之前验证过的状态修正，覆盖 KG 中的过时值
+        self._status_fixes = self._load_status_fixes()
+        if self._status_fixes:
+            persons = self._kg.get_all_persons(graph)
+            for p in persons:
+                if p.name in self._status_fixes:
+                    fixed = self._status_fixes[p.name]
+                    if p.status != fixed:
+                        print(f"  [KG Fix] {p.name}: {p.status} → {fixed} (从缓存恢复)")
+                        p._status = fixed
+            print(f"  [KG] 从缓存恢复 {len(self._status_fixes)} 个状态修正")
 
         # 3. 蒸馏文风 Profile（优先读缓存）
         distiller = AuthorStyleDistiller(self._llm)
@@ -273,9 +287,40 @@ class ContinuationPipeline:
                           f"(章节 {last_chapters[-1]})")
                 else:
                     print(f"确认 {resolved}（与 KG 一致）")
-                person._status = resolved  # 直接修正 KG
+                person._status = resolved  # 修正内存中的 KG
+                self._status_fixes[name] = resolved  # 记录待持久化
             else:
                 print("无法确定（LLM 返回空）")
+
+        # 持久化修正到磁盘（下次启动自动加载）
+        if self._status_fixes:
+            self._save_status_fixes()
+
+    def _load_status_fixes(self) -> dict:
+        """加载之前验证过的状态修正。"""
+        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
+        if not project_dir:
+            return {}
+        path = os.path.join(project_dir, "status_fixes.json")
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_status_fixes(self):
+        """持久化状态修正到项目目录。"""
+        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
+        if not project_dir:
+            return
+        path = os.path.join(project_dir, "status_fixes.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._status_fixes, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
     def _llm_resolve_status(self, name: str, context: str,
                             last_chapter: int) -> str:
