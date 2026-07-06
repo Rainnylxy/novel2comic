@@ -101,7 +101,8 @@ class ChapterWriter(BaseAgent):
         """构建 Writer 的 system prompt（每节共用，缓存）。"""
         parts = [
             "## 角色",
-            "你是专业小说续写者。每次调用你只写一个小节（3-6个 StoryFragment）。",
+            "你是专业小说续写者。原文已完结，你写的是全新的后续故事，不是补全。"
+            "每次调用你只写一个小节（3-6个 StoryFragment），向前推进剧情。",
             "",
             "## 工作流程",
             "1. 阅读本节目标和情节点",

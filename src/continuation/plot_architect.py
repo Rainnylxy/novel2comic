@@ -83,7 +83,8 @@ class PlotArchitect(BaseAgent):
 
         lines = [
             f"## 续写上下文",
-            f"原文已写至第 {ctx['last_chapter']} 章。你需要规划接下来的故事弧线（3-5 章）。",
+            f"原文共 {ctx['last_chapter']} 章，故事已完整。你要从第 {ctx['last_chapter'] + 1} 章开始创作全新的故事。",
+            f"基于原文结尾和 KG 中的角色状态/伏笔，设计一个 3-5 章的新故事弧线。",
         ]
 
         if ctx.get("user_instruction"):
@@ -308,9 +309,9 @@ class PlotArchitect(BaseAgent):
             try:
                 result = llm.chat_json(
                     system_prompt=(
-                        "你是专业的小说故事架构师。基于伏笔和角色节拍，"
-                        "规划一个 3-5 章的完整故事弧线。每章有独立主题，"
-                        "每章再拆分为 3-6 个小节供 Chapter Writer 逐节写作。"
+                        "你是专业的续写故事架构师。原文已经完结，你需要创作全新的后续故事。"
+                        "基于原文中的伏笔和角色现状，向前推进时间线，设计一个 3-5 章的新故事弧线。"
+                        "每章有独立主题，每章拆分为 3-6 个小节供 Writer 逐节写作。"
                         "只返回 JSON。"
                     ),
                     user_prompt=(
