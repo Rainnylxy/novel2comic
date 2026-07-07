@@ -238,7 +238,7 @@ class ContinuationPipeline:
         # 按名字长度降序排列，避免"江停"匹配到"江停的前队友"中的子串问题
         mentioned = []
         for p in sorted(persons, key=lambda x: -len(x.name)):
-            if p.name in text and p.name not in self._status_verified:
+            if p.name and p.name in text and p.name not in self._status_verified:
                 mentioned.append(p)
 
         if not mentioned:

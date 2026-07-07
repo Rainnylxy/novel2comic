@@ -138,31 +138,59 @@ class PlotArchitect(BaseAgent):
             else:
                 task = prefix + "\n\n任务: 规划一个 3-5 章的故事弧线。依次调用 analyze_hanging_threads → sketch_character_beats → plan_arc。"
         result = await super().run(task)
-        # Critical 1: AgentFlow 返回原始 str，契约要求 dict
+        logger.info("PlotArchitect output type: %s", type(result).__name__)
+
+        # AgentFlow 返回可能是 dict / str / AgentResult 对象
+        text = None
         if isinstance(result, dict):
             return result
         if isinstance(result, str):
+            text = result
+        elif hasattr(result, 'content'):
+            text = str(result.content)
+        elif hasattr(result, 'text'):
+            text = str(result.text)
+        else:
+            text = str(result)
+
+        if text:
             try:
-                return json.loads(result)
+                return json.loads(text)
             except (json.JSONDecodeError, TypeError):
-                pass
-        # 兜底返回
+                logger.warning("无法解析为 JSON: %.200s", text)
+                import re
+                m = re.search(r'\{.*"chapters".*\}', text, re.DOTALL)
+                if m:
+                    try:
+                        return json.loads(m.group())
+                    except json.JSONDecodeError:
+                        pass
+
+        # 兜底
         last_ch = self._outline_context.get("last_chapter", 0)
+        logger.warning("PlotArchitect 使用兜底方案")
         return {
-            "chapter_number": last_ch + 1,
-            "title": "续",
-            "synopsis": "继续推进故事",
-            "structure": {
-                "opening": "衔接上一章结尾",
-                "rising": "推进现有冲突",
-                "climax": "关键转折",
-                "hook": "悬念钩子",
-            },
+            "arc_title": "续",
+            "arc_synopsis": "继续推进故事",
+            "chapters": [{
+                "chapter_number": last_ch + 1,
+                "title": "续",
+                "synopsis": "继续推进故事",
+                "tone": "保持原作风格",
+                "sections": [
+                    {"name": "opening", "goal": "衔接上一章结尾", "characters": [],
+                     "key_beats": ["开场"], "target_fragments": 5},
+                    {"name": "rising", "goal": "推进冲突", "characters": [],
+                     "key_beats": ["推进"], "target_fragments": 6},
+                    {"name": "climax", "goal": "关键转折", "characters": [],
+                     "key_beats": ["高潮"], "target_fragments": 5},
+                    {"name": "hook", "goal": "章尾悬念", "characters": [],
+                     "key_beats": ["悬念"], "target_fragments": 3},
+                ],
+            }],
             "plot_threads_advanced": [],
             "plot_threads_introduced": [],
-            "tone": "保持原作风格",
-            "target_word_count": 3000,
-            "status": "ok",
+            "status": "fallback",
         }
 
     def _build_tools(self) -> list:

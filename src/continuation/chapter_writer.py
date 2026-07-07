@@ -406,22 +406,36 @@ class ChapterWriter(BaseAgent):
     # Post-turn: 从 LLM 自然终止输出中提取 StoryFragment
     # ================================================================
 
-    def _on_post_turn(self, user_msg: str, assistant_msg: str):
-        """从 AgentFlow 自然终止输出中解析 StoryFragment。"""
+    def _on_post_turn(self, user_msg: str, assistant_msg):
+        """从 AgentFlow 自然终止输出中解析 StoryFragment。
+
+        assistant_msg 可能是 str 或 AgentFlow 的 AgentResult 对象。
+        """
         from .fragment import StoryFragment
 
         if not assistant_msg:
             return
 
-        # AgentFlow 自然终止时，assistant_msg 是 LLM 直接输出的文本
+        # 提取文本：兼容 str 和 AgentResult 类型
+        if isinstance(assistant_msg, str):
+            text = assistant_msg
+        elif hasattr(assistant_msg, 'content'):
+            text = str(assistant_msg.content)
+        elif hasattr(assistant_msg, 'text'):
+            text = str(assistant_msg.text)
+        else:
+            text = str(assistant_msg)
+
+        if not text or not text.strip():
+            return
+
         # 尝试按行解析 JSON fragment
-        for line in assistant_msg.strip().split("\n"):
+        for line in text.strip().split("\n"):
             line = line.strip()
             if not line or not line.startswith("{"):
                 continue
             fragment = StoryFragment.parse_stream_line(line)
             if fragment:
-                # 同步放入队列（_on_post_turn 在 run 内同步调用）
                 try:
                     self._fragment_queue.put_nowait(fragment)
                 except asyncio.QueueFull:
