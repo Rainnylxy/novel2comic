@@ -18,9 +18,12 @@ from agentflow.runtime.toolkit import tool
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
-    _h = logging.StreamHandler()
-    _h.setFormatter(logging.Formatter("[%(name)s] %(levelname)s: %(message)s"))
-    logger.addHandler(_h)
+    _fh = logging.FileHandler("plot_architect.log", encoding="utf-8")
+    _fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    ))
+    logger.addHandler(_fh)
     logger.setLevel(logging.INFO)
 
 from ..agents.base_agent import BaseAgent
