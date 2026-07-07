@@ -138,9 +138,11 @@ class PlotArchitect(BaseAgent):
             else:
                 task = prefix + "\n\n任务: 规划一个 3-5 章的故事弧线。依次调用 analyze_hanging_threads → sketch_character_beats → plan_arc。"
         result = await super().run(task)
-        # AgentFlow 返回 AgentResult(output=str, tool_calls=list, steps=list)
+        # 记录完整输出
+        logger.info("=== PlotArchitect 最终输出 ===")
         from agentflow.runtime.builder import AgentResult
         if isinstance(result, AgentResult):
+            logger.info("最终输出:\n%s", result.output[:2000])
             text = result.output
         elif isinstance(result, dict):
             return result
@@ -247,10 +249,11 @@ class PlotArchitect(BaseAgent):
                 "active_conflicts": conflicts[:5],
                 "total_hanging": len(hanging),
             }, ensure_ascii=False)
-            logger.info(
-                "analyze_hanging_threads: %d 未解决伏笔, %d 活跃冲突",
-                len(hanging), len(conflicts),
-            )
+            logger.info("analyze_hanging_threads 返回:\n%s",
+                        json.dumps({"hanging_threads": hanging[:10],
+                                    "active_conflicts": conflicts[:5],
+                                    "total_hanging": len(hanging)},
+                                   ensure_ascii=False, indent=2))
             return result
 
         @tool
@@ -313,9 +316,8 @@ class PlotArchitect(BaseAgent):
                     max_tokens=2048,
                 )
                 if isinstance(result, dict):
-                    chars = result.get("characters", result)
-                    arcs = {n: c.get("arc", "?") for n, c in chars.items()} if isinstance(chars, dict) else {}
-                    logger.info("sketch_character_beats: %s", arcs)
+                    logger.info("sketch_character_beats 返回:\n%s",
+                                json.dumps(result, ensure_ascii=False, indent=2))
                     return json.dumps(result, ensure_ascii=False)
             except Exception:
                 pass
@@ -387,11 +389,8 @@ class PlotArchitect(BaseAgent):
                     max_tokens=2048,
                 )
                 if isinstance(result, dict):
-                    chapters = result.get("chapters", [])
-                    ch_titles = [f"第{c.get('chapter_number','?')}章「{c.get('title','?')}」"
-                                 for c in chapters]
-                    logger.info("plan_arc: %s — %s",
-                                result.get("arc_title", "?"), ", ".join(ch_titles))
+                    logger.info("plan_arc 返回:\n%s",
+                                json.dumps(result, ensure_ascii=False, indent=2))
                     result.setdefault("chapter_number", last_ch + 1)
                     result.setdefault("status", "ok")
                     return json.dumps(result, ensure_ascii=False)
