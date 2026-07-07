@@ -255,6 +255,108 @@ def _print_fragment_terminal(frag: dict):
 # CLI 入口
 # ============================================================
 
+def run_server(args):
+    """启动 Web 服务（同步，Tornado 自己管理事件循环）。"""
+    api_key = _require_api_key()
+    base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
+    model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
+    tool_model = os.getenv("AGENTFLOW_TOOL_MODEL", model)
+    proxy = os.getenv("AGENTFLOW_PROXY", "")
+
+    ctx, services, llm = _build_context_and_services(api_key, base_url, model, proxy, tool_model)
+
+    port = getattr(args, "port", 8000)
+
+    from ..server import start_server
+    start_server(ctx, services, llm, port)
+
+
+def run_frontend(args):
+    """启动前端开发服务器（同步阻塞）。"""
+    import http.server
+    import socketserver
+
+    port = getattr(args, "port", 3000)
+    backend = getattr(args, "backend", "http://localhost:8000")
+
+    # 找到 frontend 目录
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    frontend_dir = os.path.join(root_dir, "frontend")
+
+    # 动态注入 API_BASE
+    html_path = os.path.join(frontend_dir, "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    html_content = html_content.replace(
+        "window.API_BASE || 'http://localhost:8000'",
+        f"'{backend}'",
+    )
+
+    class FrontendHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=frontend_dir, **kwargs)
+
+        def do_GET(self):
+            if self.path == "/" or self.path == "/index.html":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(html_content.encode("utf-8"))
+            else:
+                super().do_GET()
+
+        def log_message(self, format, *args):
+            print(f"[Frontend] {args[0]}")
+
+    with socketserver.TCPServer(("", port), FrontendHandler) as httpd:
+        print(f"\n{'='*50}")
+        print(f"  🖥  互动小说前端")
+        print(f"  地址: http://localhost:{port}")
+        print(f"  后端: {backend}")
+        print(f"  按 Ctrl+C 停止")
+        print(f"{'='*50}\n")
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\n[Frontend] 已停止")
+
+
+async def run_roleplay(args):
+    """角色扮演模式。"""
+    api_key = _require_api_key()
+    base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
+    model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
+    tool_model = os.getenv("AGENTFLOW_TOOL_MODEL", model)
+    proxy = os.getenv("AGENTFLOW_PROXY", "")
+
+    ctx, services, llm = _build_context_and_services(api_key, base_url, model, proxy, tool_model)
+
+    character = getattr(args, "character", "主角")
+    start_chapter = getattr(args, "chapter", 0) or 0
+
+    if getattr(args, "novel", None):
+        _load_novel(args.novel, services, ctx)
+
+    from ..agents.roleplay_agent import RolePlayAgent
+    agent = RolePlayAgent(ctx, services, llm)
+    agent.init_character(character, start_chapter=start_chapter)
+
+    novel_name = ctx.novel.title if ctx.novel else "未知"
+    ch_info = f"第{start_chapter}章" if start_chapter else "首次出场章节"
+    first_task = (
+        f"角色 {character} 已加载。小说: 《{novel_name}》({ch_info})。"
+        f"现在以 {character} 的身份开始对话。"
+        f"记住: 每次回复前先 Thought（内心独白），然后根据需要调用 "
+        f"retrieve_memory / adjust_emotion / check_boundary，最后直接输出对话。"
+    )
+
+    await _run_interactive_loop(agent, first_task)
+
+
+# ============================================================
+# Write 模式 —— 续写模式
+# ============================================================
+
 def main():
     parser = argparse.ArgumentParser(description="Novel2Comic - 续写引擎")
     subparsers = parser.add_subparsers(dest="command", help="命令")
