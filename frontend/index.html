@@ -355,7 +355,7 @@
            placeholder="输入指令调整续写方向..."
            autocomplete="off">
     <button id="inject-btn" disabled>发送</button>
-    <button id="next-btn" style="display:none" onclick="nextChapter()">下一章 ▶</button>
+    <button id="next-btn" style="display:none">下一章 ▶</button>
   </div>
 </div>
 
@@ -381,6 +381,7 @@
   const fragContainer  = $('fragment-container');
   const injectInput    = $('inject-input');
   const injectBtn      = $('inject-btn');
+  const nextBtn        = nextBtn;
   const startForm      = $('start-form');
   const startBtn       = $('start-btn');
   const novelPathInput = $('novel-path');
@@ -537,12 +538,12 @@
         removeTypingCursor();
         injectBtn.style.display = 'none';
         injectInput.style.display = 'none';
-        $('next-btn').style.display = 'inline-block';
+        nextBtn.style.display = 'inline-block';
         break;
 
       case 'done':
         setStatus('就绪', '');
-        $('next-btn').style.display = 'inline-block';
+        nextBtn.style.display = 'inline-block';
         break;
 
       case 'error':
@@ -576,7 +577,7 @@
     injectInput.style.display = 'block';
     injectBtn.disabled = true;
     injectInput.disabled = true;
-    $('next-btn').style.display = 'none';
+    nextBtn.style.display = 'none';
     fragmentCount = 0;
 
     await startStream();
@@ -678,7 +679,7 @@
   // 下一章
   // ============================================================
   async function nextChapter() {
-    $('next-btn').style.display = 'none';
+    nextBtn.style.display = 'none';
     injectBtn.style.display = 'inline-block';
     injectInput.style.display = 'block';
     injectBtn.disabled = true;
@@ -768,6 +769,8 @@
     }
   });
 
+  // 下一章按钮
+  nextBtn.addEventListener('click', nextChapter);
   // 定期轮询状态（每 15 秒）
   setInterval(pollState, 15000);
 
