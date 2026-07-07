@@ -17,6 +17,11 @@ from typing import TYPE_CHECKING, Optional
 from agentflow.runtime.toolkit import tool
 
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("[%(name)s] %(levelname)s: %(message)s"))
+    logger.addHandler(_h)
+    logger.setLevel(logging.INFO)
 
 from ..agents.base_agent import BaseAgent
 
@@ -210,11 +215,16 @@ class PlotArchitect(BaseAgent):
                         "shared_history": rel.shared_history or "",
                     })
 
-            return json.dumps({
+            result = json.dumps({
                 "hanging_threads": hanging[:10],
                 "active_conflicts": conflicts[:5],
                 "total_hanging": len(hanging),
             }, ensure_ascii=False)
+            logger.info(
+                "analyze_hanging_threads: %d 未解决伏笔, %d 活跃冲突",
+                len(hanging), len(conflicts),
+            )
+            return result
 
         @tool
         def sketch_character_beats(character_names: str) -> str:
@@ -276,11 +286,15 @@ class PlotArchitect(BaseAgent):
                     max_tokens=2048,
                 )
                 if isinstance(result, dict):
+                    chars = result.get("characters", result)
+                    arcs = {n: c.get("arc", "?") for n, c in chars.items()} if isinstance(chars, dict) else {}
+                    logger.info("sketch_character_beats: %s", arcs)
                     return json.dumps(result, ensure_ascii=False)
             except Exception:
                 pass
 
             # Fallback
+            logger.warning("sketch_character_beats: LLM 失败，使用兜底")
             fallback = {
                 name: {"arc": "持续推进", "key_action": "参与关键事件",
                        "emotional_beat": "对事件做出反应"}
@@ -346,6 +360,11 @@ class PlotArchitect(BaseAgent):
                     max_tokens=2048,
                 )
                 if isinstance(result, dict):
+                    chapters = result.get("chapters", [])
+                    ch_titles = [f"第{c.get('chapter_number','?')}章「{c.get('title','?')}」"
+                                 for c in chapters]
+                    logger.info("plan_arc: %s — %s",
+                                result.get("arc_title", "?"), ", ".join(ch_titles))
                     result.setdefault("chapter_number", last_ch + 1)
                     result.setdefault("status", "ok")
                     return json.dumps(result, ensure_ascii=False)
