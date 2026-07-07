@@ -1,16 +1,31 @@
 # -*- coding: utf-8 -*-
-"""Novel2Comic 新入口 —— 多 Agent 架构。
+"""Novel2Comic —— 续写引擎入口。
 
 用法:
-    python main.py comic --text "小说片段" --title 第一章
-    python main.py comic --novel novels/poyun.txt --chapter 3
-    python main.py continue --novel novels/poyun.txt --from-chapter 50
-    python main.py roleplay --novel novels/poyun.txt --character 苏墨
+    python main.py write --novel novels/poyun.txt
+    python main.py server --port 8000
+    python main.py frontend --port 3000
 """
 
 import asyncio
 import os
 import sys
+
+# 自动加载 .env 文件
+def _load_dotenv():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip()
+                if key and key not in os.environ:
+                    os.environ[key] = val
+
+_load_dotenv()
 
 # Windows 修复
 if sys.platform == "win32":
