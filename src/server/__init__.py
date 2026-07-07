@@ -1,26 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Web 服务器 —— Tornado 应用。
+"""Web 服务器 —— Tornado 应用（仅续写 API）。"""
 
-用法:
-    from src.server import create_app
-    app = create_app(ctx, services, llm)
-    app.listen(8000)
-    tornado.ioloop.IOLoop.current().start()
-"""
-
-import os
 import tornado.web
 
-from .session_manager import SessionManager
-from .handlers import (
-    set_session_manager,
-    StartHandler,
-    MessageHandler,
-    ChoiceHandler,
-    StateHandler,
-    StreamHandler,
-    HealthHandler,
-)
 from .write_handlers import (
     WriteStartHandler,
     WriteInjectHandler,
@@ -28,66 +10,40 @@ from .write_handlers import (
 )
 
 
+class HealthHandler(tornado.web.RequestHandler):
+    def get(self):
+        self.write({"status": "ok"})
+
+
 def create_app(ctx, services, llm) -> tornado.web.Application:
-    """创建 Tornado 应用。
-
-    Args:
-        ctx: GlobalContext
-        services: ServiceRegistry
-        llm: UnifiedLLM
-
-    Returns:
-        tornado.web.Application
-    """
-
-    # 全局 SessionManager
-    session_mgr = SessionManager()
-    set_session_manager(session_mgr)
-
     settings = {
         "global_context": ctx,
         "services": services,
         "llm": llm,
         "debug": True,
     }
-
     app = tornado.web.Application(
         [
-            # Roleplay API（保持不动）
             (r"/api/health", HealthHandler),
-            (r"/api/play/start", StartHandler),
-            (r"/api/play/message", MessageHandler),
-            (r"/api/play/choice", ChoiceHandler),
-            (r"/api/play/state", StateHandler),
-            (r"/api/play/stream", StreamHandler),
-            # 续写 API（新增）
             (r"/api/write/start", WriteStartHandler),
             (r"/api/write/inject", WriteInjectHandler),
             (r"/api/write/state", WriteStateHandler),
         ],
         **settings,
     )
-
     return app
 
 
 def start_server(ctx, services, llm, port: int = 8000):
-    """启动 Web 服务器。
-
-    Args:
-        ctx: GlobalContext
-        services: ServiceRegistry
-        llm: UnifiedLLM
-        port: 监听端口
-    """
     import tornado.ioloop
-
     app = create_app(ctx, services, llm)
     app.listen(port)
     print(f"\n{'='*50}")
-    print(f"  📖 Novel2Comic Web 服务")
-    print(f"  🎭 Roleplay API: http://localhost:{port}/api/play/*")
-    print(f"  ✍️  续写 API: http://localhost:{port}/api/write/*")
+    print(f"  📖 续写引擎 Web 服务")
+    print(f"  地址: http://localhost:{port}")
+    print(f"  ✍️  /api/write/start  — 启动续写")
+    print(f"  💬  /api/write/inject — 注入指令")
+    print(f"  📊  /api/write/state  — 查询状态")
     print(f"  按 Ctrl+C 停止服务")
     print(f"{'='*50}\n")
     tornado.ioloop.IOLoop.current().start()
