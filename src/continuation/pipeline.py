@@ -60,6 +60,9 @@ class ContinuationPipeline:
         self._status_verified: set = set()
         # 验证修正的状态（待持久化）
         self._status_fixes: dict = {}
+        # 当前故事弧线（Plot Architect 规划多章，Pipeline 逐章执行）
+        self._pending_arc: dict = {}
+        self._arc_chapter_index: int = 0
 
         # 缓存数据
         self._style_profile = None
@@ -507,94 +510,94 @@ class ContinuationPipeline:
         if not self.architect or not self.writer:
             raise RuntimeError("请先调用 load_novel() 加载小说")
 
-        # —— 阶段 1: 大纲 ——
-        self._phase = "planning"
-        print(f"\n{'─'*40}\n[Phase 1/4] 剧情规划 — Plot Architect 分析 KG 并生成大纲...")
-        yield PipelineEvent("phase", {"phase": "planning"})
+        need_plan = not self._pending_arc or self._arc_chapter_index >= len(
+            self._pending_arc.get("chapters", []))
 
-        self.architect.set_context(
-            previous_chapter_ending=self._previous_chapter_ending,
-            style_profile=self._style_profile,
-            character_profiles=self._character_profiles,
-            last_chapter=self._chapter,
-            user_instruction=instruction,
-            character_statuses=self._get_character_statuses(),
-        )
+        # —— 阶段 1: 大纲（无待写章节时才规划） ——
+        if need_plan:
+            self._phase = "planning"
+            print(f"\n{'─'*40}\n[Phase 1/4] 剧情规划 — Plot Architect 分析 KG 并规划故事弧线...")
+            yield PipelineEvent("phase", {"phase": "planning"})
 
-        architect_result_raw = await self.architect.run(
-            f"为第 {self._chapter + 1} 章规划大纲"
-        )
+            self.architect.set_context(
+                previous_chapter_ending=self._previous_chapter_ending,
+                style_profile=self._style_profile,
+                character_profiles=self._character_profiles,
+                last_chapter=self._chapter,
+                user_instruction=instruction,
+                character_statuses=self._get_character_statuses(),
+            )
 
-        # 解析 Plot Architect 的输出（可能是 ReAct 的自然文本终止）
-        outline = self._parse_outline(architect_result_raw)
-        # 按需验证：大纲中涉及的角色做现场状态校验
-        outline_text = json.dumps(outline, ensure_ascii=False)
-        self._verify_characters_in_text(outline_text)
-        yield PipelineEvent("outline", outline)
+            architect_result_raw = await self.architect.run(
+                f"规划从第 {self._chapter + 1} 章开始的故事弧线"
+            )
 
-        # —— 阶段 2: 写作（逐章逐节调度） ——
+            self._pending_arc = self._parse_outline(architect_result_raw)
+            self._arc_chapter_index = 0
+            # 确保有 chapters 数组
+            if "chapters" not in self._pending_arc:
+                self._pending_arc = {"chapters": [self._pending_arc]}
+            # 验证大纲中涉及的角色
+            outline_text = json.dumps(self._pending_arc, ensure_ascii=False)
+            self._verify_characters_in_text(outline_text)
+            yield PipelineEvent("outline", self._pending_arc)
+
+        # —— 阶段 2: 写作（只写下一章） ——
         self._phase = "writing"
-        chapters = outline.get("chapters", [])
-        if not chapters:
-            # 兼容旧格式：单章
-            chapters = [outline]
-        arc_title = outline.get("arc_title", "")
-        if arc_title:
-            print(f"[Phase 2/4] 故事弧线「{arc_title}」— {len(chapters)} 章")
-        else:
-            print(f"[Phase 2/4] 写作 — {len(chapters)} 章")
+        chapters = self._pending_arc.get("chapters", [])
+        chapter = chapters[self._arc_chapter_index]
+        ch_num = chapter.get("chapter_number", self._chapter + 1)
+        ch_title = chapter.get("title", "")
+        sections = chapter.get("sections", [])
+        if not sections:
+            sections = [{"name": "main", "goal": chapter.get("synopsis", ""),
+                         "characters": [], "key_beats": [], "target_fragments": 20}]
+
+        total_ch = len(chapters)
+        print(f"[Phase 2/4] 第{ch_num}章「{ch_title}」(弧线 {self._arc_chapter_index + 1}/{total_ch}) — {len(sections)} 节")
         yield PipelineEvent("phase", {"phase": "writing"})
+        yield PipelineEvent("fragment", {
+            "type": "divider", "text": "",
+            "divider_label": f"第{ch_num}章「{ch_title}」"
+        })
 
         draft_fragments = []
-        for ch_idx, chapter in enumerate(chapters):
-            ch_num = chapter.get("chapter_number", self._chapter + ch_idx + 1)
-            ch_title = chapter.get("title", "")
-            sections = chapter.get("sections", [])
-            if not sections:
-                sections = [{"name": "main", "goal": chapter.get("synopsis", ""),
-                             "characters": [], "key_beats": [], "target_fragments": 15}]
+        for i, section in enumerate(sections):
+            section_name = section.get("name", f"section_{i}")
+            print(f"  [{i+1}/{len(sections)}] {section_name}: "
+                  f"{section.get('goal', '')[:50]}")
 
-            print(f"\n  [第{ch_num}章「{ch_title}」] {len(sections)} 个小节")
-            # 推送章节分隔
-            yield PipelineEvent("fragment", {
-                "type": "divider", "text": "",
-                "divider_label": f"第{ch_num}章「{ch_title}」"
-            })
+            section_text = json.dumps(section, ensure_ascii=False)
+            self._verify_characters_in_text(section_text)
 
-            for i, section in enumerate(sections):
-                section_name = section.get("name", f"section_{i}")
-                print(f"    [{i+1}/{len(sections)}] {section_name}: "
-                      f"{section.get('goal', '')[:50]}")
+            self.writer.set_context(
+                section=section,
+                section_index=i,
+                total_sections=len(sections),
+                style_profile=self._style_profile,
+                previous_chapter_ending=self._previous_chapter_ending
+                    if (self._arc_chapter_index == 0 and i == 0) else "",
+                character_profiles=self._character_profiles,
+                character_statuses=self._get_character_statuses(),
+                graph=self._ctx.novel.story_graph
+                    if self._ctx.novel else None,
+            )
 
-                # 按需验证本节涉及的角色
-                section_text = json.dumps(section, ensure_ascii=False)
-                self._verify_characters_in_text(section_text)
+            async for fragment in self.writer.stream(section):
+                draft_fragments.append(fragment)
+                self._fragment_count += 1
+                yield PipelineEvent("fragment", fragment.to_dict())
 
-                self.writer.set_context(
-                    section=section,
-                    section_index=i,
-                    total_sections=len(sections),
-                    style_profile=self._style_profile,
-                    previous_chapter_ending=self._previous_chapter_ending
-                        if (ch_idx == 0 and i == 0) else "",
-                    character_profiles=self._character_profiles,
-                    character_statuses=self._get_character_statuses(),
-                    graph=self._ctx.novel.story_graph
-                        if self._ctx.novel else None,
+            if draft_fragments:
+                recent = draft_fragments[-3:]
+                self._previous_chapter_ending = "\n".join(
+                    f"[{f.type}] {f.character + ': ' if f.character else ''}{f.text}"
+                    for f in recent
                 )
 
-                async for fragment in self.writer.stream(section):
-                    draft_fragments.append(fragment)
-                    self._fragment_count += 1
-                    yield PipelineEvent("fragment", fragment.to_dict())
-
-                # 更新衔接上下文
-                if draft_fragments:
-                    recent = draft_fragments[-3:]
-                    self._previous_chapter_ending = "\n".join(
-                        f"[{f.type}] {f.character + ': ' if f.character else ''}{f.text}"
-                        for f in recent
-                    )
+        # 推进到下一章
+        self._arc_chapter_index += 1
+        self._chapter = ch_num
 
         # —— 阶段 3: 审校 ——
         self._phase = "reviewing"
@@ -676,6 +679,8 @@ class ContinuationPipeline:
 
         # Fallback
         return {
+            "arc_title": "续",
+            "arc_synopsis": "继续推进故事",
             "chapters": [{
                 "chapter_number": self._chapter + 1,
                 "title": "续",
@@ -683,13 +688,13 @@ class ContinuationPipeline:
                 "tone": "保持原作风格",
                 "sections": [
                     {"name": "opening", "goal": "衔接上一章", "characters": [],
-                     "key_beats": ["开场"], "target_fragments": 5},
+                     "key_beats": ["开场"], "target_fragments": 8},
                     {"name": "rising", "goal": "推进冲突", "characters": [],
-                     "key_beats": ["推进"], "target_fragments": 5},
+                     "key_beats": ["推进"], "target_fragments": 10},
                     {"name": "climax", "goal": "关键转折", "characters": [],
-                     "key_beats": ["高潮"], "target_fragments": 5},
+                     "key_beats": ["高潮"], "target_fragments": 8},
                     {"name": "hook", "goal": "章尾悬念", "characters": [],
-                     "key_beats": ["悬念"], "target_fragments": 3},
+                     "key_beats": ["悬念"], "target_fragments": 5},
                 ],
             }],
             "status": "parsed_fallback",

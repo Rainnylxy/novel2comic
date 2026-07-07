@@ -91,8 +91,7 @@ class PlotArchitect(BaseAgent):
 
         lines = [
             f"## 续写上下文",
-            f"原文共 {ctx['last_chapter']} 章，故事已完整。你要从第 {ctx['last_chapter'] + 1} 章开始创作全新的故事。",
-            f"基于原文结尾和 KG 中的角色状态/伏笔，设计一个 3-5 章的新故事弧线。",
+            f"原文共 {ctx['last_chapter']} 章，故事已完整。你要从第 {ctx['last_chapter'] + 1} 章开始创作全新的后续故事。",
         ]
 
         if ctx.get("user_instruction"):
@@ -353,8 +352,7 @@ class PlotArchitect(BaseAgent):
                 result = llm.chat_json(
                     system_prompt=(
                         "你是专业的续写故事架构师。原文已经完结，你需要创作全新的后续故事。"
-                        "基于原文中的伏笔和角色现状，向前推进时间线，设计一个 3-5 章的新故事弧线。"
-                        "每章有独立主题，每章拆分为 3-6 个小节供 Writer 逐节写作。"
+                        "基于伏笔和角色现状，设计一个 3-5 章的故事弧线。每章拆分为 3-6 个小节。"
                         "只返回 JSON。"
                     ),
                     user_prompt=(
@@ -362,20 +360,20 @@ class PlotArchitect(BaseAgent):
                         f"## 角色节拍 & 伏笔\n{arc_spec}\n\n"
                         f"## 原文结尾\n{prev_ending[-1500:]}\n\n"
                         + (f"## 用户指令\n{instruction}\n\n" if instruction else "")
-                        + f"从第 {last_ch + 1} 章开始，规划 3-5 章。返回 JSON:\n"
+                        + f"从第 {last_ch + 1} 章开始，规划 3-5 章的故事弧线。返回 JSON:\n"
                           f'{{\n'
-                          f'  "arc_title": "故事弧线名",\n'
+                          f'  "arc_title": "弧线名",\n'
                           f'  "arc_synopsis": "整个弧线的梗概（100字内）",\n'
                           f'  "chapters": [\n'
                           f'    {{\n'
                           f'      "chapter_number": {last_ch + 1},\n'
                           f'      "title": "章节标题",\n'
-                          f'      "synopsis": "本章梗概（50字内）",\n'
-                          f'      "tone": "冷峻/紧张/悬疑...",\n'
+                          f'      "synopsis": "本章梗概",\n'
+                          f'      "tone": "基调",\n'
                           f'      "sections": [\n'
-                          f'        {{"name": "opening", "goal": "本节目标（30字内）", '
-                          f'"characters": ["角色名"], "key_beats": ["情节点"], '
-                          f'"target_fragments": 5}},\n'
+                          f'        {{"name": "opening", "goal": "本节目标", '
+                          f'"characters": ["角色"], "key_beats": ["情节点"], '
+                          f'"target_fragments": 8}},\n'
                           f'        ...\n'
                           f'      ]\n'
                           f'    }},\n'
