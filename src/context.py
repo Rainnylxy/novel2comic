@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .models import Novel, ChapterData
+    from .models import Novel
     from agentflow.runtime.llm_client import OpenAIClient
 
 
@@ -17,7 +17,6 @@ class GlobalContext:
     """
 
     novel: Optional["Novel"] = None
-    chapter_data: Optional["ChapterData"] = None
     llm_model: str = ""
 
     agent_llm: Optional["OpenAIClient"] = None
