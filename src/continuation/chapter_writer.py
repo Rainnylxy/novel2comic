@@ -416,13 +416,12 @@ class ChapterWriter(BaseAgent):
         if not assistant_msg:
             return
 
-        # 提取文本：兼容 str 和 AgentResult 类型
-        if isinstance(assistant_msg, str):
+        # AgentFlow 的 AgentResult 用 .output，工具返回值可能是 str
+        from agentflow.runtime.builder import AgentResult
+        if isinstance(assistant_msg, AgentResult):
+            text = assistant_msg.output
+        elif isinstance(assistant_msg, str):
             text = assistant_msg
-        elif hasattr(assistant_msg, 'content'):
-            text = str(assistant_msg.content)
-        elif hasattr(assistant_msg, 'text'):
-            text = str(assistant_msg.text)
         else:
             text = str(assistant_msg)
 

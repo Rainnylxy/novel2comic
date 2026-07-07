@@ -138,18 +138,14 @@ class PlotArchitect(BaseAgent):
             else:
                 task = prefix + "\n\n任务: 规划一个 3-5 章的故事弧线。依次调用 analyze_hanging_threads → sketch_character_beats → plan_arc。"
         result = await super().run(task)
-        logger.info("PlotArchitect output type: %s", type(result).__name__)
-
-        # AgentFlow 返回可能是 dict / str / AgentResult 对象
-        text = None
-        if isinstance(result, dict):
+        # AgentFlow 返回 AgentResult(output=str, tool_calls=list, steps=list)
+        from agentflow.runtime.builder import AgentResult
+        if isinstance(result, AgentResult):
+            text = result.output
+        elif isinstance(result, dict):
             return result
-        if isinstance(result, str):
+        elif isinstance(result, str):
             text = result
-        elif hasattr(result, 'content'):
-            text = str(result.content)
-        elif hasattr(result, 'text'):
-            text = str(result.text)
         else:
             text = str(result)
 
