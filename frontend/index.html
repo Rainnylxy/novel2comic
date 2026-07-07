@@ -355,6 +355,7 @@
            placeholder="输入指令调整续写方向..."
            autocomplete="off">
     <button id="inject-btn" disabled>发送</button>
+    <button id="next-btn" style="display:none" onclick="nextChapter()">下一章 ▶</button>
   </div>
 </div>
 
@@ -532,14 +533,16 @@
         break;
 
       case 'complete':
-        setStatus('续写完成', '');
+        setStatus('本章完成 — 点击"下一章"继续', '');
         removeTypingCursor();
-        injectBtn.disabled = false;
-        injectInput.disabled = false;
+        injectBtn.style.display = 'none';
+        injectInput.style.display = 'none';
+        $('next-btn').style.display = 'inline-block';
         break;
 
       case 'done':
         setStatus('就绪', '');
+        $('next-btn').style.display = 'inline-block';
         break;
 
       case 'error':
@@ -569,13 +572,18 @@
     readerTitle.textContent = novelPath.split('/').pop();
     setStatus('规划中...', 'active');
     fragContainer.innerHTML = '';
+    injectBtn.style.display = 'inline-block';
+    injectInput.style.display = 'block';
     injectBtn.disabled = true;
     injectInput.disabled = true;
+    $('next-btn').style.display = 'none';
     fragmentCount = 0;
 
-    // 发起 SSE 流式请求
-    abortController = new AbortController();
+    await startStream();
+    return;
 
+    // dead code kept for safety
+    abortController = new AbortController();
     try {
       var resp = await fetch(API_BASE + '/api/write/start', {
         method: 'POST',
@@ -663,6 +671,63 @@
       injectBtn.disabled = false;
       injectInput.disabled = false;
       injectInput.focus();
+    }
+  }
+
+  // ============================================================
+  // 下一章
+  // ============================================================
+  async function nextChapter() {
+    $('next-btn').style.display = 'none';
+    injectBtn.style.display = 'inline-block';
+    injectInput.style.display = 'block';
+    injectBtn.disabled = true;
+    injectInput.disabled = true;
+    setStatus('规划中...', 'active');
+
+    // 复用 startWriting 的请求逻辑
+    await startStream();
+  }
+
+  async function startStream() {
+    abortController = new AbortController();
+    try {
+      var resp = await fetch(API_BASE + '/api/write/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          novel_path: novelPathInput.value.trim(),
+          instruction: ''
+        }),
+        signal: abortController.signal
+      });
+      readerRef = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      while (true) {
+        var chunk = await readerRef.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        var currentEvent = '';
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          if (line.indexOf('event: ') === 0) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.indexOf('data: ') === 0) {
+            try {
+              var data = JSON.parse(line.slice(6));
+              handleSSEEvent(currentEvent, data);
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setStatus('连接错误', 'error');
+      }
     }
   }
 
