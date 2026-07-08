@@ -533,11 +533,13 @@ class ContinuationPipeline:
             yield PipelineEvent("phase", {"phase": "planning"})
 
             # 创建可变 roadmap_store，Agent 通过工具自主读写
+            project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
             roadmap_store = {
                 "data": self._roadmap,
                 "chapter_index": self._roadmap_chapter_index,
                 "next_chapter": ch_num,
                 "dirty": False,
+                "project_dir": project_dir,  # 工具内部可直接落盘
             }
 
             self.architect.set_context(
@@ -548,12 +550,18 @@ class ContinuationPipeline:
                 user_instruction=instruction,
                 character_statuses=self._get_character_statuses(),
                 roadmap_store=roadmap_store,
+                # 角色验证状态（共享可变引用，Agent 通过 verify_character 工具读写）
+                status_verified=self._status_verified,
+                status_fixes=self._status_fixes,
+                novel_text=self._get_novel_text(),
             )
 
-            # 一次调用，Agent 内部自己决定：查路线图 → 用完了就更新 → 查伏笔/角色 → 产出章节规划
+            # 一次调用，Agent 内部自己决定：
+            #   查路线图 → 用完了就更新 → verify_character(角色) → 查伏笔 → 产出章节规划
             chapter_raw = await self.architect.run(
                 f"请根据当前进度，完成第{ch_num}章的详细规划。"
                 f"如果路线图已用尽或不存在，请先更新路线图。"
+                f"使用角色前，请用 verify_character 工具确认其当前状态。"
             )
 
             # 如果 Agent 修改了路线图，持久化
@@ -570,13 +578,13 @@ class ContinuationPipeline:
             # 解析章节规划
             chapter = self._parse_chapter_plan(chapter_raw)
 
+            # 持久化章节规划到磁盘，便于审查
+            if project_dir:
+                self._save_chapter_plan(project_dir, ch_num, chapter)
+
             # 包装为兼容现有写作循环的格式
             self._pending_arc = {"chapters": [chapter]}
             self._arc_chapter_index = 0
-
-            # 验证大纲中涉及的角色
-            outline_text = json.dumps(self._pending_arc, ensure_ascii=False)
-            self._verify_characters_in_text(outline_text)
             yield PipelineEvent("outline", self._pending_arc)
 
         # —— 阶段 2: 写作（只写下一章） ——
@@ -598,6 +606,17 @@ class ContinuationPipeline:
             "divider_label": f"第{ch_num}章「{ch_title}」"
         })
 
+        # 注入整章结构体（一次性，不在每节重复）
+        self.writer.set_context(
+            chapter=chapter,
+            style_profile=self._style_profile,
+            character_profiles=self._character_profiles,
+            character_statuses=self._get_character_statuses(),
+            graph=self._ctx.novel.story_graph if self._ctx.novel else None,
+            previous_chapter_ending=self._previous_chapter_ending
+                if self._arc_chapter_index == 0 else "",
+        )
+
         draft_fragments = []
         for i, section in enumerate(sections):
             section_name = section.get("name", f"section_{i}")
@@ -607,20 +626,7 @@ class ContinuationPipeline:
             section_text = json.dumps(section, ensure_ascii=False)
             self._verify_characters_in_text(section_text)
 
-            self.writer.set_context(
-                section=section,
-                section_index=i,
-                total_sections=len(sections),
-                style_profile=self._style_profile,
-                previous_chapter_ending=self._previous_chapter_ending
-                    if (self._arc_chapter_index == 0 and i == 0) else "",
-                character_profiles=self._character_profiles,
-                character_statuses=self._get_character_statuses(),
-                graph=self._ctx.novel.story_graph
-                    if self._ctx.novel else None,
-            )
-
-            async for fragment in self.writer.stream(section):
+            async for fragment in self.writer.stream(section, section_index=i):
                 draft_fragments.append(fragment)
                 self._fragment_count += 1
                 yield PipelineEvent("fragment", fragment.to_dict())
@@ -825,6 +831,18 @@ class ContinuationPipeline:
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(index, f)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _save_chapter_plan(project_dir: str, chapter_number: int, chapter: dict):
+        """持久化单章章节规划到磁盘，便于审查。"""
+        if not project_dir:
+            return
+        path = os.path.join(project_dir, f"chapter_{chapter_number:04d}.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(chapter, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 

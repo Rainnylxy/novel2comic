@@ -140,6 +140,11 @@ class PlotArchitect(BaseAgent):
         self._character_statuses: dict = {}
         self._roadmap_store: Optional[dict] = None  # mutable: {data, chapter_index, next_chapter, dirty}
 
+        # 角色验证状态（共享可变引用，Pipeline 和 Architect 共用）
+        self._status_verified: set = set()
+        self._status_fixes: dict = {}
+        self._novel_text: str = ""
+
     # ================================================================
     # 上下文设置
     # ================================================================
@@ -153,12 +158,19 @@ class PlotArchitect(BaseAgent):
         user_instruction: str = "",
         character_statuses: dict = None,
         roadmap_store: Optional[dict] = None,
+        status_verified: set = None,
+        status_fixes: dict = None,
+        novel_text: str = "",
     ):
         """设置运行时上下文。在每次 run() 前由 Pipeline 调用。
 
         Args:
             roadmap_store: 可变 dict {data, chapter_index, next_chapter, dirty}，
                            Agent 通过 lookup_roadmap / update_roadmap 工具读写它。
+            status_verified: 共享可变 set，已验证过的角色名。
+                             Agent 通过 verify_character 工具读写。
+            status_fixes: 共享可变 dict {name: status}，验证后的状态修正。
+            novel_text: 小说全文（用于角色出场章节定位）。
 
         不调 set_identity() —— system prompt 来自 skill 文件（缓存），
         动态上下文通过 run() 中的 _build_dynamic_prefix() 注入。
@@ -170,6 +182,9 @@ class PlotArchitect(BaseAgent):
         self._user_instruction = user_instruction
         self._character_statuses = character_statuses or {}
         self._roadmap_store = roadmap_store or {}
+        self._status_verified = status_verified or set()
+        self._status_fixes = status_fixes or {}
+        self._novel_text = novel_text
 
     # ================================================================
     # 动态前缀（Push 上下文）
@@ -272,7 +287,115 @@ class PlotArchitect(BaseAgent):
         return result
 
     # ================================================================
-    # 工具（Pull —— 纯代码 KG 查询）
+    # 角色验证辅助方法
+    # ================================================================
+
+    @staticmethod
+    def _split_novel_by_chapter(text: str) -> dict:
+        """按章节切分小说。Returns {chapter_number: chapter_text}."""
+        import re
+        pattern = re.compile(r'(第[零一二三四五六七八九十百千\d]+章[^\n]*)')
+        parts = pattern.split(text)
+        chapters = {}
+        current_ch = 0
+        current_text = []
+        for part in parts:
+            m = pattern.match(part)
+            if m:
+                if current_ch > 0 and current_text:
+                    chapters[current_ch] = "".join(current_text)
+                current_ch = PlotArchitect._parse_chapter_number(m.group(1))
+                current_text = [part]
+            else:
+                current_text.append(part)
+        if current_ch > 0 and current_text:
+            chapters[current_ch] = "".join(current_text)
+        return chapters
+
+    @staticmethod
+    def _find_chapters_by_name(name: str, chapters: dict) -> list:
+        """规则定位：角色在哪些章节出场（纯字符串匹配）。"""
+        appeared = []
+        for ch_num in sorted(chapters.keys()):
+            if name in chapters[ch_num]:
+                appeared.append(ch_num)
+        return appeared
+
+    @staticmethod
+    def _extract_name_context(name: str, text: str, window: int = 300) -> str:
+        """提取角色名周围上下文段落。取最后 5 处出现。"""
+        contexts = []
+        idx = 0
+        while True:
+            idx = text.find(name, idx)
+            if idx == -1:
+                break
+            start = max(0, idx - window)
+            end = min(len(text), idx + window)
+            ctx = text[start:end].strip()
+            if len(ctx) >= 20:
+                contexts.append(ctx)
+            idx += len(name)
+        return "\n---\n".join(contexts[-5:]) if contexts else text[-2000:]
+
+    @staticmethod
+    def _parse_chapter_number(title: str) -> int:
+        """从 '第X章' 中解析章节号。"""
+        import re
+        m = re.search(r'第\s*(\d+)\s*章', title)
+        if m:
+            return int(m.group(1))
+        cn = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
+              "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+              "十": 10, "百": 100, "千": 1000}
+        m = re.search(r'第([零一二三四五六七八九十百千]+)章', title)
+        if m:
+            s = m.group(1)
+            result = 0
+            unit = 1
+            for ch in reversed(s):
+                if ch in ("十", "百", "千"):
+                    unit = cn[ch]
+                else:
+                    result += cn.get(ch, 0) * unit
+            return result if result > 0 else unit
+        return 0
+
+    def _resolve_character_dossier(self, name: str, context: str,
+                                   last_chapter: int) -> dict:
+        """LLM 分析角色完整档案：状态 + 结局 + 伏笔。"""
+        if not context or len(context) < 20:
+            return {}
+
+        prompt = (
+            f"你是专业小说分析员。根据角色最后几次出场的原文片段，全面分析该角色的当前状态和结局。\n\n"
+            f"角色: {name}\n"
+            f"最后出场章节: 第{last_chapter}章\n\n"
+            f"原文场景:\n{context[:3000]}\n\n"
+            f"请返回 JSON:\n"
+            f'{{"status": "dead|active|missing|arrested",'
+            f'"ending": "该角色在原文中的结局——如何退场的？最后在做什么？一句话概括。",'
+            f'"foreshadowing": "该角色身上还有哪些未解决的伏笔或线索。没有则填 无。",'
+            f'"key_relationships": "该角色与其他角色的关键关系——对谁重要？谁在意他的生死？",'
+            f'"evidence": "证明以上判断的原文关键句引用"}}\n\n'
+            f"只返回 JSON。"
+        )
+
+        try:
+            result = self._llm.chat_json(
+                system_prompt="你是专业小说分析员。只返回 JSON，不返回其他内容。",
+                user_prompt=prompt,
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            if isinstance(result, dict) and result.get("status"):
+                return result
+        except Exception:
+            pass
+        return {}
+
+    # ================================================================
+    # 工具（Pull —— 纯代码 KG 查询 + 角色验证）
     # ================================================================
 
     def _build_tools(self) -> list:
@@ -547,6 +670,20 @@ class PlotArchitect(BaseAgent):
             store["chapter_index"] = 0
             store["dirty"] = True
 
+            # 立即落盘，避免 Agent 后续崩溃导致路线图丢失
+            project_dir = store.get("project_dir", "")
+            if project_dir:
+                try:
+                    import os as _os
+                    _path = _os.path.join(project_dir, "roadmap.json")
+                    with open(_path, "w", encoding="utf-8") as _f:
+                        json.dump(new_roadmap, _f, ensure_ascii=False, indent=2)
+                    _path2 = _os.path.join(project_dir, "roadmap_index.json")
+                    with open(_path2, "w", encoding="utf-8") as _f:
+                        json.dump(0, _f)
+                except Exception:
+                    pass  # 落盘失败不阻塞规划流程
+
             ms_count = len(new_roadmap.get("milestones", []))
             return (
                 f"路线图已更新: 《{new_roadmap.get('roadmap_title', '?')}》"
@@ -555,9 +692,85 @@ class PlotArchitect(BaseAgent):
                 f"{new_roadmap['milestones'][0].get('milestone_title', '?')}"
             )
 
+        @tool
+        def verify_character(name: str) -> str:
+            """验证角色的当前状态（生死/失踪/活跃）。
+
+            当你需要用到某个角色但不确定其最新状态时，调用此工具。
+            已验证过的角色不会重复分析，直接返回缓存结果。
+
+            验证过程:
+            1. 在原文中定位该角色最后出场的章节
+            2. 提取上下文 + LLM 分析 → 确定状态/结局/伏笔
+            3. 更新角色状态缓存
+
+            Args:
+                name: 角色名
+
+            Returns:
+                角色的验证后状态信息
+            """
+            verified = self_ref._status_verified
+            fixes = self_ref._status_fixes
+
+            # 已验证过，直接返回缓存
+            if name in verified:
+                status = fixes.get(name, "?")
+                return f"[已缓存] {name}: {status}（已验证，无需重复分析）"
+
+            novel_text = self_ref._novel_text
+            if not novel_text:
+                return f"无法验证 {name}：小说原文不可用"
+
+            chapters = PlotArchitect._split_novel_by_chapter(novel_text)
+            if not chapters:
+                return f"无法验证 {name}：章节解析失败"
+
+            # 规则定位：角色出场的章节
+            appeared = PlotArchitect._find_chapters_by_name(name, chapters)
+            if not appeared:
+                verified.add(name)
+                return f"{name}: 未在原文中找到出场章节（可能为原创角色或名字拼写有误）"
+
+            # 取最后 3 章文本
+            last_chapters = sorted(appeared)[-3:]
+            last_text = "\n".join(chapters.get(ch, "") for ch in last_chapters)
+            context = PlotArchitect._extract_name_context(name, last_text)
+
+            # LLM 分析
+            dossier = self_ref._resolve_character_dossier(name, context, last_chapters[-1])
+
+            verified.add(name)
+
+            if dossier:
+                resolved = dossier.get("status", "?")
+                ending = dossier.get("ending", "")
+                foreshadowing = dossier.get("foreshadowing", "")
+                fixes[name] = resolved
+
+                # 同步更新 KG PersonNode，确保 Writer 的 lookup_character 也能读到正确状态
+                graph = ctx.novel.story_graph if ctx.novel else None
+                if graph:
+                    person = kg.get_person(graph, name) if hasattr(kg, 'get_person') else None
+                    if person and person.status != resolved:
+                        person._status = resolved
+
+                lines = [f"{name}: {resolved}"]
+                if ending:
+                    lines.append(f"  结局: {ending[:120]}")
+                if foreshadowing and foreshadowing != "无":
+                    lines.append(f"  伏笔: {foreshadowing[:120]}")
+                evidence = dossier.get("evidence", "")
+                if evidence:
+                    lines.append(f"  原文依据: {evidence[:120]}")
+                return "\n".join(lines)
+            else:
+                return f"{name}: 无法确定状态（LLM 返回空），请基于原文上下文自行判断"
+
         return [
             lookup_roadmap,
             update_roadmap,
+            verify_character,
             gather_hanging_threads,
             gather_active_conflicts,
             lookup_character,

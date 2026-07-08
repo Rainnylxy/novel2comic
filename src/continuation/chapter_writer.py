@@ -42,10 +42,8 @@ class ChapterWriter(BaseAgent):
         super().__init__(ctx, services, llm, memory)
         self._kg = services.kg
 
-        # 运行时上下文
-        self._section: dict = {}
-        self._section_index: int = 0
-        self._total_sections: int = 1
+        # 运行时上下文（set_context 一次性注入整个 chapter 结构体）
+        self._chapter: dict = {}
         self._style_profile = None
         self._previous_chapter_ending: str = ""
         self._character_profiles: dict = {}
@@ -64,41 +62,44 @@ class ChapterWriter(BaseAgent):
 
     def set_context(
         self,
-        section: dict,
-        section_index: int,
-        total_sections: int,
+        chapter: dict,
         style_profile,
-        previous_chapter_ending: str,
         character_profiles: dict,
         character_statuses: dict = None,
         graph=None,
+        previous_chapter_ending: str = "",
     ):
-        """设置 Writer 运行时上下文 —— 每次只写一个小节。
+        """设置 Writer 运行时上下文 —— 整章一次性注入。
+
+        chapter 结构体包含:
+          - chapter_number, title, synopsis, tone
+          - character_beats: {name: {arc, key_action, emotional_beat}}
+          - sections: [{name, goal, characters, key_beats, target_fragments}]
 
         Args:
-            section: {name, goal, characters, tone, key_beats, target_fragments}
-            section_index: 当前是第几节（0-based）
-            total_sections: 总共几节
+            chapter: 完整章节规划 dict（来自 PlotArchitect 输出）
             style_profile: AuthorStyleProfile
-            previous_chapter_ending: 衔接文本
-            character_profiles: 角色蒸馏 Profile
-            character_statuses: 角色状态映射
+            character_profiles: 角色蒸馏 Profile（lookup_character 工具按需查询）
+            character_statuses: 角色状态映射（dead/missing/active）
             graph: StoryGraph（Writer 用它按需查询角色信息）
+            previous_chapter_ending: 上一章结尾衔接文本
         """
-        self._section = section
-        self._section_index = section_index
-        self._total_sections = total_sections
+        self._chapter = chapter
         self._style_profile = style_profile
         self._previous_chapter_ending = previous_chapter_ending
         self._character_profiles = character_profiles or {}
         self._character_statuses = character_statuses or {}
         self._graph = graph
 
-        # 构建 system prompt（会被 AgentFlow 缓存，不随每节变化）
+        # 构建 system prompt（会被 AgentFlow 缓存）
         self.set_identity(self._build_system_prompt())
 
     def _build_system_prompt(self) -> str:
-        """构建 Writer 的 system prompt（每节共用，缓存）。"""
+        """构建 Writer 的 system prompt（缓存，不随小节变化）。
+
+        Push（锚点）: 角色状态硬约束 + 风格核心标签
+        Pull（工具）: 角色 Voice/Boundary → lookup_character(name)
+        """
         parts = [
             "## 角色",
             "你是专业小说续写者。原文已完结，你写的是全新的后续故事，不是补全。"
@@ -106,13 +107,13 @@ class ChapterWriter(BaseAgent):
             "",
             "## 工作流程",
             "1. 阅读本节目标和情节点",
-            "2. 如有不熟悉的角色 → lookup_character",
+            "2. **先用 lookup_character(name) 查询本节涉及角色的 Voice 和行为边界**",
             "3. 如有伏笔需要 → recall_foreshadowing",
             "4. 写本节内容（3-6 个 StoryFragment JSON）",
             "5. 自然终止 —— 不要嵌套调用工具",
             "",
             "## 输出格式",
-            "write_section 工具输出的 text 字段直接以 StoryFragment JSON 格式逐行输出:",
+            "以 StoryFragment JSON 格式逐行输出:",
             '  {"type": "narration", "text": "旁白/叙述文本..."}',
             '  {"type": "dialogue", "character": "角色名", "text": "对话内容..."}',
             '  {"type": "action", "character": "角色名", "text": "动作描写..."}',
@@ -123,17 +124,11 @@ class ChapterWriter(BaseAgent):
             "1. dialogue/action/inner_thought 的 character 必须用原文中的准确角色名",
             "2. 对话和动作交替推进，不要连续输出太长的 narration",
             "3. 保持原作叙事风格和角色性格一致性",
-            "4. 每节写 3-6 段片段即可，不要一节写太多",
+            "4. 写角色之前必须 lookup_character 确认其 Voice 和边界",
+            "5. 每节写 3-6 段片段即可，不要一节写太多",
         ]
 
-        # 注入文风约束
-        if self._style_profile:
-            parts.append("\n" + self._style_profile.summary())
-            exemplars_text = self._style_profile.exemplars_text()
-            if exemplars_text:
-                parts.append("\n" + exemplars_text)
-
-        # 注入角色生死状态（硬约束）
+        # 注入角色生死状态（硬约束 —— Push）
         if self._character_statuses:
             dead_chars = [n for n, s in self._character_statuses.items()
                           if s in ("dead", "deceased", "killed")]
@@ -141,25 +136,17 @@ class ChapterWriter(BaseAgent):
                              if s == "missing"]
             if dead_chars:
                 parts.append(f"\n## ⚠️ 已死亡角色: {', '.join(dead_chars)}")
-                parts.append("只能以回忆/闪回/他人提及出现。")
+                parts.append("只能以回忆/闪回/他人提及出现，绝不能写他们的对话或动作。")
             if missing_chars:
                 parts.append(f"\n## ⚠️ 下落不明角色: {', '.join(missing_chars)}")
+                parts.append("不能直接出场，只能通过线索/回忆间接涉及。")
 
-        # 注入角色行为约束
-        if self._character_profiles:
-            parts.append("\n## 角色行为约束")
-            for name, profile in self._character_profiles.items():
-                parts.append(f"\n### {name}")
-                if hasattr(profile, 'voice') and profile.voice:
-                    v = profile.voice
-                    if v.summary:
-                        parts.append(f"- Voice: {v.summary}")
-                    if v.taboo_words:
-                        parts.append(f"- 禁用词: {', '.join(v.taboo_words)}")
-                if hasattr(profile, 'boundary') and profile.boundary:
-                    b = profile.boundary
-                    if b.hard_rules:
-                        parts.append(f"- 硬底线: {', '.join(b.hard_rules[:3])}")
+        # 注入文风概要（轻量 Push —— 只给核心标签）
+        if self._style_profile:
+            parts.append("\n" + self._style_profile.summary())
+            exemplars_text = self._style_profile.exemplars_text()
+            if exemplars_text:
+                parts.append("\n" + exemplars_text)
 
         return "\n".join(parts)
 
@@ -172,18 +159,18 @@ class ChapterWriter(BaseAgent):
         self._inject_instruction = instruction
         self._inject_event.set()
 
-    async def stream(self, section: dict):
+    async def stream(self, section: dict, section_index: int = 0):
         """流式生成一个小节的内容。
 
-        AgentFlow ReAct 循环写本节。Pipeline 逐节调用此方法。
+        Pipeline 逐节调用此方法。chapter 结构体已在 set_context 中注入。
 
         Yields:
             StoryFragment
         """
         from .fragment import StoryFragment
 
-        # 构建 user prompt（只包含本节信息）
-        task = self._build_user_prompt(section)
+        # 构建 user prompt（本章上下文 + 本节信息）
+        task = self._build_user_prompt(section, section_index)
         self._fragment_queue = asyncio.Queue()
 
         # 启动 AgentFlow ReAct 循环（异步，结果通过 queue 流出）
@@ -226,16 +213,34 @@ class ChapterWriter(BaseAgent):
             logger.warning("ChapterWriter run error: %s", e)
             await self._fragment_queue.put(None)
 
-    def _build_user_prompt(self, section: dict) -> str:
-        """构建 user prompt —— 只包含当前一节的信息。"""
+    def _build_user_prompt(self, section: dict, section_index: int) -> str:
+        """构建 user prompt —— 本章上下文 + 本节信息。"""
+        ch = self._chapter
+        sections = ch.get("sections", [])
+        total = len(sections)
+
         parts = [
-            f"## 写作任务: {section.get('name', '')}",
-            f"你在写第 {self._section_index + 1}/{self._total_sections} 节",
-            f"叙事目标: {section.get('goal', '')}",
+            f"## 本章: 第{ch.get('chapter_number', '?')}章「{ch.get('title', '')}」",
+            f"本章梗概: {ch.get('synopsis', '')}",
+            f"本章基调: {ch.get('tone', '')}",
         ]
 
+        # 角色节拍（本章各角色的情绪轨迹）
+        beats = ch.get("character_beats", {})
+        if beats:
+            parts.append("\n## 本章角色节拍")
+            for name, beat in beats.items():
+                parts.append(f"- {name}: {beat.get('arc', '')} | "
+                             f"关键行动: {beat.get('key_action', '')} | "
+                             f"情感时刻: {beat.get('emotional_beat', '')}")
+
+        # 当前小节
+        parts.append(f"\n## 本节任务: {section.get('name', '')} "
+                      f"({section_index + 1}/{total})")
+        parts.append(f"叙事目标: {section.get('goal', '')}")
+
         # 基调
-        tone = section.get("tone", "")
+        tone = section.get("tone", "") or ch.get("tone", "")
         if tone:
             parts.append(f"基调: {tone}")
 
@@ -338,12 +343,18 @@ class ChapterWriter(BaseAgent):
             elif status == "missing":
                 lines.append("\n⚠️ 此角色下落不明！不能直接出场。")
 
-            # Voice 约束
+            # Voice 约束 + 行为边界（按需 Pull，不从 system prompt 推送）
             profile = char_profiles.get(name)
             if profile and hasattr(profile, 'voice') and profile.voice:
                 v = profile.voice
                 if v.summary:
                     lines.append(f"Voice: {v.summary}")
+                if v.taboo_words:
+                    lines.append(f"禁用词: {', '.join(v.taboo_words)}")
+            if profile and hasattr(profile, 'boundary') and profile.boundary:
+                b = profile.boundary
+                if b.hard_rules:
+                    lines.append(f"硬底线: {', '.join(b.hard_rules[:5])}")
 
             return "\n".join(lines)
 

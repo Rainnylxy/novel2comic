@@ -94,7 +94,7 @@ class TestPipelineFlow:
         }))
         mock_writer = MagicMock()
         mock_fragment = StoryFragment(type="narration", text="测试叙述。")
-        mock_writer.stream = lambda outline: async_gen([mock_fragment])
+        mock_writer.stream = lambda *args, **kwargs: async_gen([mock_fragment])
         mock_reviewer = MagicMock()
         mock_reviewer.run = AsyncMock(return_value=json.dumps({
             "issues": [], "overall_score": 8.0,
