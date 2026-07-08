@@ -71,12 +71,26 @@ class TestPipelineFlow:
         pipeline._previous_chapter_ending = "test ending"
         pipeline._chapter = 2
 
-        # Mock agents
+        # Mock agents — Pipeline 只调一次 architect.run()，Agent 内部自主决策
         mock_architect = MagicMock()
         mock_architect.run = AsyncMock(return_value=json.dumps({
-            "chapter_number": 3, "title": "测试", "synopsis": "测试大纲",
-            "structure": {"opening": "", "rising": "", "climax": "", "hook": ""},
+            "type": "chapter",
+            "chapter_number": 3,
+            "title": "测试",
+            "synopsis": "测试大纲",
             "tone": "测试",
+            "milestone_source": 1,
+            "character_beats": {},
+            "sections": [
+                {"name": "opening", "goal": "开场", "characters": [],
+                 "key_beats": ["开场"], "target_fragments": 3},
+                {"name": "rising", "goal": "推进", "characters": [],
+                 "key_beats": ["推进"], "target_fragments": 3},
+                {"name": "climax", "goal": "高潮", "characters": [],
+                 "key_beats": ["高潮"], "target_fragments": 3},
+                {"name": "hook", "goal": "悬念", "characters": [],
+                 "key_beats": ["悬念"], "target_fragments": 2},
+            ],
         }))
         mock_writer = MagicMock()
         mock_fragment = StoryFragment(type="narration", text="测试叙述。")

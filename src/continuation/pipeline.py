@@ -17,7 +17,7 @@ import re
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
 from .fragment import PipelineEvent, StoryFragment
-from .plot_architect import PlotArchitect
+from .plot_architect import PlotArchitect, make_fallback_chapter, make_fallback_roadmap
 from .chapter_writer import ChapterWriter
 from .consistency_reviewer import ConsistencyReviewer
 from .revision_editor import RevisionEditor
@@ -63,6 +63,10 @@ class ContinuationPipeline:
         # 当前故事弧线（Plot Architect 规划多章，Pipeline 逐章执行）
         self._pending_arc: dict = {}
         self._arc_chapter_index: int = 0
+
+        # 篇章路线图（10-20 章高层规划，持久化到 roadmap.json）
+        self._roadmap: dict = {}
+        self._roadmap_chapter_index: int = 0
 
         # 缓存数据
         self._style_profile = None
@@ -143,6 +147,14 @@ class ContinuationPipeline:
                         print(f"  [KG Fix] {p.name}: {p.status} → {fixed} (从缓存恢复)")
                         p._status = fixed
             print(f"  [KG] 从缓存恢复 {len(self._status_fixes)} 个状态修正")
+
+        # 2.5 加载篇章路线图（优先读缓存）
+        project_dir = self._ctx.novel.output_dir or ""
+        self._roadmap = self._load_roadmap(project_dir) if project_dir else {}
+        self._roadmap_chapter_index = self._load_roadmap_index(project_dir) if project_dir else 0
+        if self._roadmap:
+            ms_count = len(self._roadmap.get("milestones", []))
+            print(f"[Roadmap] 从缓存加载：{ms_count} 个里程碑, 当前第 {self._roadmap_chapter_index + 1} 个")
 
         # 3. 蒸馏文风 Profile（优先读缓存）
         distiller = AuthorStyleDistiller(self._llm)
@@ -513,11 +525,20 @@ class ContinuationPipeline:
         need_plan = not self._pending_arc or self._arc_chapter_index >= len(
             self._pending_arc.get("chapters", []))
 
-        # —— 阶段 1: 大纲（无待写章节时才规划） ——
+        # —— 阶段 1: Agent 自主规划 ——
         if need_plan:
             self._phase = "planning"
-            print(f"\n{'─'*40}\n[Phase 1/4] 剧情规划 — Plot Architect 分析 KG 并规划故事弧线...")
+            ch_num = self._chapter + 1
+            print(f"\n{'─'*40}\n[Phase 1/4] 剧情规划 — Plot Architect 自主规划第{ch_num}章...")
             yield PipelineEvent("phase", {"phase": "planning"})
+
+            # 创建可变 roadmap_store，Agent 通过工具自主读写
+            roadmap_store = {
+                "data": self._roadmap,
+                "chapter_index": self._roadmap_chapter_index,
+                "next_chapter": ch_num,
+                "dirty": False,
+            }
 
             self.architect.set_context(
                 previous_chapter_ending=self._previous_chapter_ending,
@@ -526,17 +547,33 @@ class ContinuationPipeline:
                 last_chapter=self._chapter,
                 user_instruction=instruction,
                 character_statuses=self._get_character_statuses(),
+                roadmap_store=roadmap_store,
             )
 
-            architect_result_raw = await self.architect.run(
-                f"规划从第 {self._chapter + 1} 章开始的故事弧线"
+            # 一次调用，Agent 内部自己决定：查路线图 → 用完了就更新 → 查伏笔/角色 → 产出章节规划
+            chapter_raw = await self.architect.run(
+                f"请根据当前进度，完成第{ch_num}章的详细规划。"
+                f"如果路线图已用尽或不存在，请先更新路线图。"
             )
 
-            self._pending_arc = self._parse_outline(architect_result_raw)
+            # 如果 Agent 修改了路线图，持久化
+            if roadmap_store.get("dirty"):
+                self._roadmap = roadmap_store["data"]
+                self._roadmap_chapter_index = roadmap_store.get("chapter_index", 0)
+                project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
+                if project_dir:
+                    self._save_roadmap(project_dir, self._roadmap)
+                    self._save_roadmap_index(project_dir, self._roadmap_chapter_index)
+                ms_count = len(self._roadmap.get("milestones", []))
+                print(f"  [Roadmap] Agent 更新了路线图: {self._roadmap.get('roadmap_title', '?')} — {ms_count} 个里程碑")
+
+            # 解析章节规划
+            chapter = self._parse_chapter_plan(chapter_raw)
+
+            # 包装为兼容现有写作循环的格式
+            self._pending_arc = {"chapters": [chapter]}
             self._arc_chapter_index = 0
-            # 确保有 chapters 数组
-            if "chapters" not in self._pending_arc:
-                self._pending_arc = {"chapters": [self._pending_arc]}
+
             # 验证大纲中涉及的角色
             outline_text = json.dumps(self._pending_arc, ensure_ascii=False)
             self._verify_characters_in_text(outline_text)
@@ -599,6 +636,12 @@ class ContinuationPipeline:
         self._arc_chapter_index += 1
         self._chapter = ch_num
 
+        # 推进路线图里程碑
+        self._roadmap_chapter_index += 1
+        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
+        if project_dir:
+            self._save_roadmap_index(project_dir, self._roadmap_chapter_index)
+
         # —— 阶段 3: 审校 ——
         self._phase = "reviewing"
         print(f"[Phase 3/4] 一致性审校 — Reviewer 正在对照 KG 检查草稿...")
@@ -654,51 +697,136 @@ class ContinuationPipeline:
         if self.writer:
             await self.writer.inject(instruction)
 
-    def _parse_outline(self, raw: str) -> dict:
-        """从 Plot Architect 的 ReAct 输出中解析大纲。"""
-        # AgentFlow 自然终止时返回的是 LLM 输出的文本
-        # 可能是纯 JSON 或包含 JSON 的文本
-        if isinstance(raw, dict):
-            return raw
+    # ================================================================
+    # Agent 输出解析
+    # ================================================================
 
-        text = str(raw).strip()
+    @staticmethod
+    def _parse_architect_output(raw) -> dict:
+        """从 AgentFlow 输出中提取 JSON dict。
+
+        处理 AgentResult / str / dict 三种格式。
+        """
+        from agentflow.runtime.builder import AgentResult
+
+        if isinstance(raw, AgentResult):
+            text = raw.output
+        elif isinstance(raw, str):
+            text = raw
+        elif isinstance(raw, dict):
+            return raw
+        else:
+            text = str(raw)
+
+        if not text or not text.strip():
+            return {}
+
         # 尝试直接解析
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
 
-        # 尝试从文本中提取 JSON 块
+        # 从 markdown 代码块或 JSON 块中提取
         import re
-        json_match = re.search(r'\{.*"chapter_number".*\}', text, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group())
-            except json.JSONDecodeError:
-                pass
+        for pattern in [
+            r'```(?:json)?\s*\n?(.*?)\n?```',
+            r'\{.*"type".*"(?:roadmap|chapter)".*\}',
+            r'\{.*"chapter_number".*\}',
+            r'\{.*"roadmap_title".*\}',
+            r'\{.*"sections".*\}',
+        ]:
+            m = re.search(pattern, text, re.DOTALL)
+            if m:
+                group = m.group(1) if pattern.startswith(r'```') else m.group()
+                try:
+                    return json.loads(group)
+                except (json.JSONDecodeError, IndexError):
+                    continue
 
-        # Fallback
-        return {
-            "arc_title": "续",
-            "arc_synopsis": "继续推进故事",
-            "chapters": [{
-                "chapter_number": self._chapter + 1,
-                "title": "续",
-                "synopsis": "继续推进故事",
-                "tone": "保持原作风格",
-                "sections": [
-                    {"name": "opening", "goal": "衔接上一章", "characters": [],
-                     "key_beats": ["开场"], "target_fragments": 8},
-                    {"name": "rising", "goal": "推进冲突", "characters": [],
-                     "key_beats": ["推进"], "target_fragments": 10},
-                    {"name": "climax", "goal": "关键转折", "characters": [],
-                     "key_beats": ["高潮"], "target_fragments": 8},
-                    {"name": "hook", "goal": "章尾悬念", "characters": [],
-                     "key_beats": ["悬念"], "target_fragments": 5},
-                ],
-            }],
-            "status": "parsed_fallback",
-        }
+        return {}
+
+    def _parse_roadmap(self, raw) -> dict:
+        """解析篇章路线图。失败时返回兜底 roadmap。"""
+        data = self._parse_architect_output(raw)
+        if data and data.get("milestones"):
+            data.setdefault("status", "ok")
+            return data
+        print("  [Warning] 路线图解析失败，使用兜底方案")
+        return make_fallback_roadmap(self._chapter + 1)
+
+    def _parse_chapter_plan(self, raw) -> dict:
+        """解析单章章节规划。失败时返回兜底章节。"""
+        data = self._parse_architect_output(raw)
+        if data and data.get("sections"):
+            data.setdefault("status", "ok")
+            return data
+        # 兼容旧格式：如果 data 自身就是 chapter dict（含 chapter_number）
+        if data and data.get("chapter_number") and data.get("synopsis"):
+            # 旧格式没有 sections，补上兜底 sections
+            if "sections" not in data:
+                fallback = make_fallback_chapter(data["chapter_number"])
+                data["sections"] = fallback["sections"]
+            data.setdefault("status", "ok")
+            return data
+        print("  [Warning] 章节规划解析失败，使用兜底方案")
+        return make_fallback_chapter(self._chapter + 1)
+
+    # ================================================================
+    # 路线图持久化
+    # ================================================================
+
+    @staticmethod
+    def _load_roadmap(project_dir: str) -> dict:
+        """从项目目录加载篇章路线图。"""
+        if not project_dir:
+            return {}
+        path = os.path.join(project_dir, "roadmap.json")
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    @staticmethod
+    def _save_roadmap(project_dir: str, roadmap: dict):
+        """持久化篇章路线图到项目目录。"""
+        if not project_dir:
+            return
+        path = os.path.join(project_dir, "roadmap.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(roadmap, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _load_roadmap_index(project_dir: str) -> int:
+        """加载路线图当前里程碑索引。"""
+        if not project_dir:
+            return 0
+        path = os.path.join(project_dir, "roadmap_index.json")
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return 0
+
+    @staticmethod
+    def _save_roadmap_index(project_dir: str, index: int):
+        """持久化路线图当前里程碑索引。"""
+        if not project_dir:
+            return
+        path = os.path.join(project_dir, "roadmap_index.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(index, f)
+        except Exception:
+            pass
 
     def _parse_review(self, raw: str) -> dict:
         """从 Reviewer 输出中解析问题列表。"""

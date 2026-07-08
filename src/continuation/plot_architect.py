@@ -1,13 +1,21 @@
 # -*- coding: utf-8 -*-
 """PlotArchitect —— 剧情架构师 Agent。
 
-继承 BaseAgent，通过 ReAct 循环管理:
-  - 伏笔分析 (analyze_hanging_threads)
-  - 角色节拍规划 (sketch_character_beats)
-  - 章节结构设计 (plan_structure)
+继承 BaseAgent，通过 AgentFlow ReAct 循环做两级规划:
+  1. 篇章路线图（Roadmap）: 10-20 章高层规划
+  2. 章节规划（Chapter Plan）: 单章详细规划 + 角色节拍
 
-输入: KG 上下文 + 上一章结尾 + 用户指令 + 文风 Profile
-输出: 章节大纲 JSON
+工具（纯代码 KG 查询，无嵌套 LLM 调用）:
+  - gather_hanging_threads()  — 未解决伏笔
+  - gather_active_conflicts() — 活跃冲突
+  - lookup_character(name)    — 角色详细档案
+  - get_event_timeline()      — 事件时间线
+
+Push 上下文（动态前缀，每次 run() 时注入）:
+  - 角色状态（dead/missing）
+  - 风格核心标签
+  - 原文结尾
+  - 当前路线图 + 里程碑
 """
 
 import json
@@ -15,6 +23,8 @@ import logging
 from typing import TYPE_CHECKING, Optional
 
 from agentflow.runtime.toolkit import tool
+
+from ..agents.base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -26,28 +36,113 @@ if not logger.handlers:
     logger.addHandler(_fh)
     logger.setLevel(logging.INFO)
 
-from ..agents.base_agent import BaseAgent
-
 if TYPE_CHECKING:
     from ..context import GlobalContext, ServiceRegistry
     from ..llm import UnifiedLLM
     from .author_style_profile import AuthorStyleProfile
 
 
+# ============================================================
+# 兜底方案（供 Pipeline 使用）
+# ============================================================
+
+def make_fallback_chapter(chapter_number: int) -> dict:
+    """构建单章兜底大纲。"""
+    return {
+        "type": "chapter",
+        "chapter_number": chapter_number,
+        "title": "续",
+        "synopsis": "继续推进故事",
+        "tone": "保持原作风格",
+        "milestone_source": 0,
+        "character_beats": {},
+        "sections": [
+            {"name": "opening", "goal": "衔接上一章结尾", "characters": [],
+             "key_beats": ["开场"], "target_fragments": 5},
+            {"name": "rising", "goal": "推进冲突", "characters": [],
+             "key_beats": ["推进"], "target_fragments": 6},
+            {"name": "climax", "goal": "关键转折", "characters": [],
+             "key_beats": ["高潮"], "target_fragments": 5},
+            {"name": "hook", "goal": "章尾悬念", "characters": [],
+             "key_beats": ["悬念"], "target_fragments": 3},
+        ],
+        "plot_threads_advanced": [],
+        "plot_threads_introduced": [],
+    }
+
+
+def make_fallback_roadmap(chapter: int) -> dict:
+    """构建兜底篇章路线图。"""
+    return {
+        "type": "roadmap",
+        "roadmap_title": f"第{chapter}章起",
+        "roadmap_synopsis": "继续推进故事",
+        "total_chapters": 1,
+        "milestones": [{
+            "index": 1,
+            "milestone_title": f"第{chapter}章",
+            "synopsis": "继续推进故事",
+            "key_conflicts": [],
+            "characters_involved": [],
+            "thematic_focus": "延续",
+            "expected_tone": "保持原作风格",
+        }],
+        "climax_milestone": 1,
+        "final_boss_hints": "",
+        "major_themes": [],
+        "plot_threads_advanced": [],
+        "plot_threads_introduced": [],
+        "status": "fallback",
+    }
+
+
+# ============================================================
+# PlotArchitect
+# ============================================================
+
 class PlotArchitect(BaseAgent):
     """剧情架构师 Agent。
 
-    继承 BaseAgent，通过 skill 文件 + 动态前缀注入上下文。
-    3 个 ReAct 工具：analyze_hanging_threads, sketch_character_beats, plan_structure。
+    继承 BaseAgent，通过 ReAct 循环做两级规划。
+    System prompt 来自 skills/plot_architect.md（缓存）。
+    动态数据通过 _build_dynamic_prefix() 注入 task。
+
+    用法:
+        architect = PlotArchitect(ctx, services, llm)
+        architect.set_context(
+            previous_chapter_ending=...,
+            character_profiles=...,
+            last_chapter=...,
+            style_profile=...,
+            user_instruction=...,
+            character_statuses=...,
+            roadmap=...,
+            current_milestone=...,
+        )
+        result = await architect.run("规划新篇章")
+        # 或
+        result = await architect.run("制作第51章规划")
     """
 
     SKILL_NAME = "plot_architect"
 
-    def __init__(self, ctx, services, llm, memory=None):
+    def __init__(self, ctx: "GlobalContext", services: "ServiceRegistry",
+                 llm: "UnifiedLLM", memory=None):
         super().__init__(ctx, services, llm, memory)
         self._kg = services.kg
-        # 运行时注入的上下文（由 pipeline 在 run 前设置）
-        self._outline_context: dict = {}
+
+        # 运行时上下文（由 set_context 注入，每次 run 前更新）
+        self._previous_chapter_ending: str = ""
+        self._style_profile: Optional["AuthorStyleProfile"] = None
+        self._character_profiles: dict = {}
+        self._last_chapter: int = 0
+        self._user_instruction: str = ""
+        self._character_statuses: dict = {}
+        self._roadmap_store: Optional[dict] = None  # mutable: {data, chapter_index, next_chapter, dirty}
+
+    # ================================================================
+    # 上下文设置
+    # ================================================================
 
     def set_context(
         self,
@@ -57,182 +152,192 @@ class PlotArchitect(BaseAgent):
         style_profile: Optional["AuthorStyleProfile"] = None,
         user_instruction: str = "",
         character_statuses: dict = None,
+        roadmap_store: Optional[dict] = None,
     ):
-        """设置 Plot Architect 的运行时上下文。
-
-        在 Agent 构建前由 Pipeline 调用。
+        """设置运行时上下文。在每次 run() 前由 Pipeline 调用。
 
         Args:
-            previous_chapter_ending: 前一章结尾原文（~3000字）
-            character_profiles: {name: CharacterProfile} 角色蒸馏 Profile
-            last_chapter: 当前最后一章的章节号
-            style_profile: AuthorStyleProfile
-            user_instruction: 用户的初始指令（可选）
-            character_statuses: {name: status} 角色生死状态
+            roadmap_store: 可变 dict {data, chapter_index, next_chapter, dirty}，
+                           Agent 通过 lookup_roadmap / update_roadmap 工具读写它。
+
+        不调 set_identity() —— system prompt 来自 skill 文件（缓存），
+        动态上下文通过 run() 中的 _build_dynamic_prefix() 注入。
         """
-        self._outline_context = {
-            "previous_chapter_ending": previous_chapter_ending,
-            "style_summary": style_profile.summary() if style_profile else "",
-            "character_profiles": character_profiles,
-            "last_chapter": last_chapter,
-            "user_instruction": user_instruction,
-            "character_statuses": character_statuses or {},
-        }
-        self._needs_rebuild = True
+        self._previous_chapter_ending = previous_chapter_ending
+        self._style_profile = style_profile
+        self._character_profiles = character_profiles or {}
+        self._last_chapter = last_chapter
+        self._user_instruction = user_instruction
+        self._character_statuses = character_statuses or {}
+        self._roadmap_store = roadmap_store or {}
+
+    # ================================================================
+    # 动态前缀（Push 上下文）
+    # ================================================================
 
     def _build_dynamic_prefix(self) -> str:
-        """构建注入 user message 的动态前缀。
+        """构建 Push 上下文 —— 锚点数据，Agent 必须一眼看到。
 
-        放在 system prompt 缓存之外，包含变化的数据（前一章结尾等）。
+        不包含:
+          - 完整角色档案 → lookup_character 工具
+          - 所有伏笔 → gather_hanging_threads 工具
+          - 全部冲突 → gather_active_conflicts 工具
         """
-        ctx = self._outline_context
-        if not ctx:
-            return ""
+        parts = []
 
-        lines = [
-            f"## 续写上下文",
-            f"原文共 {ctx['last_chapter']} 章，故事已完整。你要从第 {ctx['last_chapter'] + 1} 章开始创作全新的后续故事。",
-        ]
+        # ── 角色状态硬约束 ──
+        if self._character_statuses:
+            dead = [n for n, s in self._character_statuses.items()
+                    if s in ("dead", "deceased", "killed")]
+            missing = [n for n, s in self._character_statuses.items()
+                       if s == "missing"]
+            if dead:
+                parts.append(f"## ⚠️ 已死亡角色: {', '.join(dead)}")
+                parts.append("只能以回忆/闪回/他人提及出现，绝不能以存活状态出场。")
+            if missing:
+                parts.append(f"## ⚠️ 下落不明角色: {', '.join(missing)}")
+                parts.append("不能直接出场，只能通过线索/回忆间接涉及。")
 
-        if ctx.get("user_instruction"):
-            lines.append(f"\n用户指令: {ctx['user_instruction']}")
+        # ── 风格锚点 ──
+        if self._style_profile:
+            atmos = self._style_profile.atmosphere
+            narrative = self._style_profile.narrative
+            lines = []
+            if atmos.overall_tone:
+                lines.append(f"基调: {atmos.overall_tone}")
+            if atmos.emotional_tendency:
+                lines.append(f"情感倾向: {atmos.emotional_tendency}")
+            if narrative.cliffhanger_style:
+                lines.append(f"章尾钩子风格: {narrative.cliffhanger_style}")
+            if narrative.scene_transition_style:
+                lines.append(f"场景过渡: {narrative.scene_transition_style}")
+            if lines:
+                parts.append("## 文风概要\n" + "\n".join(lines))
 
-        # 角色生死状态（硬约束）
-        char_statuses = ctx.get("character_statuses", {})
-        dead_chars = [n for n, s in char_statuses.items()
-                      if s in ("dead", "deceased", "killed")]
-        if dead_chars:
-            lines.append(f"\n⚠️ 以下角色已死亡，绝不能在新章节中以存活状态出场: {', '.join(dead_chars)}")
-            lines.append("只能以回忆、闪回、他人提及的方式出现。")
+        # ── 路线图上下文 ──
+        store = self._roadmap_store or {}
+        roadmap = store.get("data", {})
+        ch_idx = store.get("chapter_index", 0)
+        milestones = roadmap.get("milestones", []) if roadmap else []
 
-        if ctx.get("style_summary"):
-            lines.append(f"\n{ctx['style_summary']}")
+        if milestones:
+            parts.append("## 当前篇章规划")
+            parts.append(f"篇章: {roadmap.get('roadmap_title', '?')}")
+            parts.append(f"总章数: {roadmap.get('total_chapters', '?')}")
+            parts.append(f"梗概: {roadmap.get('roadmap_synopsis', '')[:200]}")
+            if roadmap.get("major_themes"):
+                parts.append(f"核心主题: {', '.join(roadmap['major_themes'])}")
 
-        # 角色 Profile 摘要
-        char_profiles = ctx.get("character_profiles", {})
-        if char_profiles:
-            lines.append("\n## 主要角色约束")
-            for name, profile in char_profiles.items():
-                lines.append(f"\n### {name}")
-                if hasattr(profile, 'voice') and profile.voice:
-                    v = profile.voice
-                    lines.append(f"- Voice: {v.summary or '无'}")
-                if hasattr(profile, 'boundary') and profile.boundary:
-                    b = profile.boundary
-                    if b.hard_rules:
-                        lines.append(f"- 硬底线: {', '.join(b.hard_rules[:3])}")
+            if ch_idx < len(milestones):
+                ms = milestones[ch_idx]
+                parts.append(f"当前里程碑 ({ch_idx + 1}/{len(milestones)}): {ms.get('milestone_title', '?')}")
+                parts.append(f"  梗概: {ms.get('synopsis', '')}")
+                if ms.get("key_conflicts"):
+                    parts.append(f"  核心冲突: {', '.join(ms['key_conflicts'])}")
+                if ms.get("characters_involved"):
+                    parts.append(f"  涉及角色: {', '.join(ms['characters_involved'])}")
+            else:
+                parts.append(f"⚠️ 路线图已用尽（{len(milestones)} 个里程碑全部完成），请用 update_roadmap 工具创建新路线图。")
+        else:
+            parts.append("## 当前篇章规划\n暂无篇章路线图。请用 update_roadmap 工具创建新的 10-20 章路线图。")
 
-        lines.append(f"\n## 前一章结尾（叙事衔接）")
-        ending = ctx.get("previous_chapter_ending", "")
-        lines.append(ending[-3000:] if len(ending) > 3000 else ending)
+        # ── 原文结尾 ──
+        parts.append("## 原文结尾（叙事衔接点）")
+        ending = self._previous_chapter_ending
+        parts.append(ending[-500:] if len(ending) > 500 else ending)
 
-        return "\n".join(lines)
+        return "\n".join(parts)
+
+    # ================================================================
+    # run 入口
+    # ================================================================
 
     async def run(self, task: str = ""):
-        """运行 Plot Architect 的 ReAct 循环。"""
+        """运行 Plot Architect 的 ReAct 循环。
+
+        将动态前缀（Push 上下文）拼接到 task 前面，
+        然后委托给 BaseAgent.run() → AgentFlow ReAct。
+        """
         prefix = self._build_dynamic_prefix()
-        if prefix:
-            if task:
-                task = prefix + "\n\n" + task
-            else:
-                task = prefix + "\n\n任务: 规划一个 3-5 章的故事弧线。依次调用 analyze_hanging_threads → sketch_character_beats → plan_arc。"
-        result = await super().run(task)
-        # 记录完整输出
-        logger.info("=== PlotArchitect 最终输出 ===")
+        full_task = (prefix + "\n\n" + task) if prefix else task
+
+        logger.info("PlotArchitect task: %.200s", task)
+        result = await super().run(full_task)
+
+        # 记录输出
         from agentflow.runtime.builder import AgentResult
-        if isinstance(result, AgentResult):
-            logger.info("最终输出:\n%s", result.output[:2000])
-            text = result.output
-        elif isinstance(result, dict):
-            return result
-        elif isinstance(result, str):
-            text = result
-        else:
-            text = str(result)
+        output = result.output if isinstance(result, AgentResult) else str(result)
+        logger.info("PlotArchitect 输出 (前500字): %.500s", output)
 
-        if text:
-            try:
-                return json.loads(text)
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("无法解析为 JSON: %.200s", text)
-                import re
-                m = re.search(r'\{.*"chapters".*\}', text, re.DOTALL)
-                if m:
-                    try:
-                        return json.loads(m.group())
-                    except json.JSONDecodeError:
-                        pass
+        return result
 
-        # 兜底
-        last_ch = self._outline_context.get("last_chapter", 0)
-        logger.warning("PlotArchitect 使用兜底方案")
-        return {
-            "arc_title": "续",
-            "arc_synopsis": "继续推进故事",
-            "chapters": [{
-                "chapter_number": last_ch + 1,
-                "title": "续",
-                "synopsis": "继续推进故事",
-                "tone": "保持原作风格",
-                "sections": [
-                    {"name": "opening", "goal": "衔接上一章结尾", "characters": [],
-                     "key_beats": ["开场"], "target_fragments": 5},
-                    {"name": "rising", "goal": "推进冲突", "characters": [],
-                     "key_beats": ["推进"], "target_fragments": 6},
-                    {"name": "climax", "goal": "关键转折", "characters": [],
-                     "key_beats": ["高潮"], "target_fragments": 5},
-                    {"name": "hook", "goal": "章尾悬念", "characters": [],
-                     "key_beats": ["悬念"], "target_fragments": 3},
-                ],
-            }],
-            "plot_threads_advanced": [],
-            "plot_threads_introduced": [],
-            "status": "fallback",
-        }
+    # ================================================================
+    # 工具（Pull —— 纯代码 KG 查询）
+    # ================================================================
 
     def _build_tools(self) -> list:
+        self_ref = self  # 闭包捕获引用，动态读取 _last_chapter 等字段
         ctx = self._ctx
         kg = self._kg
-        llm = self._llm
-        outline_ctx = self._outline_context
+        char_profiles = self._character_profiles
+        char_statuses = self._character_statuses
 
         @tool
-        def analyze_hanging_threads() -> str:
-            """从知识图谱中提取所有未解决的伏笔和活跃冲突。
+        def gather_hanging_threads() -> str:
+            """从 KG 因果链查询所有未解决伏笔。
 
-            查询 KG 的因果关系链，找出 effect 尚未在已覆盖章节中实现的事件。
-            同时提取敌对角色的未解决冲突。
+            遍历 event_relation_edges，找出 relation_type == "causes"、
+            发生在原文范围内、且有 effect 描述的事件。
 
             Returns:
-                JSON 格式的伏笔和冲突列表
+                格式化的伏笔列表文本
             """
             if ctx.novel is None:
-                return json.dumps({"hanging_threads": [], "active_conflicts": [],
-                                   "message": "小说上下文未加载"}, ensure_ascii=False)
+                return "KG 不可用：小说上下文未加载"
             graph = ctx.novel.story_graph
             if not graph:
-                return json.dumps({"hanging_threads": [], "active_conflicts": [],
-                                   "message": "KG 不可用"}, ensure_ascii=False)
+                return "KG 不可用：StoryGraph 为空"
 
-            last_ch = outline_ctx.get("last_chapter", 0)
-
-            # 因果链中的未解决事件
+            last_ch = self_ref._last_chapter
             hanging = []
-            for edge in graph.event_relation_edges:
-                if edge.relation_type == "causes":
-                    ev = graph.get_event_node(edge.from_event.split(":", 1)[-1])
-                    if ev:
-                        ev_end = ev.chapter_end or ev.chapter_start
-                        # 如果事件的 effect 还未在新章节中体现
-                        if ev_end <= last_ch and ev.effect:
-                            hanging.append({
-                                "event": ev.name,
-                                "chapter": ev_end,
-                                "effect": ev.effect,
-                                "status": "pending",
-                            })
 
-            # 敌对关系冲突
+            for edge in graph.event_relation_edges:
+                if edge.relation_type != "causes":
+                    continue
+                ev = graph.get_event_node(edge.from_event.split(":", 1)[-1])
+                if ev is None:
+                    continue
+                ev_end = ev.chapter_end or ev.chapter_start
+                if ev_end <= last_ch and ev.effect:
+                    hanging.append({
+                        "event": ev.name,
+                        "chapter": ev_end,
+                        "effect": ev.effect,
+                    })
+
+            if not hanging:
+                return "KG 中暂无未解决伏笔记录"
+
+            lines = [f"共 {len(hanging)} 条未解决伏笔:"]
+            for h in hanging[:15]:
+                lines.append(f"- 「{h['event']}」(第{h['chapter']}章): {h['effect'][:150]}")
+            return "\n".join(lines)
+
+        @tool
+        def gather_active_conflicts() -> str:
+            """从 KG 查询当前活跃的角色冲突。
+
+            遍历 enemy_pairs，返回冲突双方、紧张度和共享历史。
+
+            Returns:
+                格式化的冲突列表文本
+            """
+            if ctx.novel is None:
+                return "KG 不可用：小说上下文未加载"
+            graph = ctx.novel.story_graph
+            if not graph:
+                return "KG 不可用：StoryGraph 为空"
+
             conflicts = []
             for pair in kg.enemy_pairs(graph):
                 rel = graph.get_relationship_edge(pair[0], pair[1])
@@ -243,184 +348,217 @@ class PlotArchitect(BaseAgent):
                         "shared_history": rel.shared_history or "",
                     })
 
-            result = json.dumps({
-                "hanging_threads": hanging[:10],
-                "active_conflicts": conflicts[:5],
-                "total_hanging": len(hanging),
-            }, ensure_ascii=False)
-            logger.info("analyze_hanging_threads 返回:\n%s",
-                        json.dumps({"hanging_threads": hanging[:10],
-                                    "active_conflicts": conflicts[:5],
-                                    "total_hanging": len(hanging)},
-                                   ensure_ascii=False, indent=2))
-            return result
+            if not conflicts:
+                return "KG 中暂无活跃冲突记录"
+
+            lines = [f"共 {len(conflicts)} 对活跃冲突:"]
+            for c in conflicts[:8]:
+                chars = ' vs '.join(c['characters'])
+                lines.append(f"- {chars}: 紧张度={c['tension']} | {c['shared_history'][:120]}")
+            return "\n".join(lines)
 
         @tool
-        def sketch_character_beats(character_names: str) -> str:
-            """为主要角色规划本章的情绪弧线和关键行动。
+        def lookup_character(name: str) -> str:
+            """查询角色的完整档案：状态、Voice、行为边界、关系、最后事件。
 
-            每个角色需要定义:
-            - arc: 本章情绪变化轨迹（如 "从犹豫到决断"）
-            - key_action: 本章该角色的关键行动
-            - emotional_beat: 关键情感时刻
+            当需要写一个角色但不清楚其设定时，按需调用。
+            不要预先查询所有角色——只查本章涉及的。
 
             Args:
-                character_names: 逗号分隔的角色名列表（如 "江停,严峫"）
+                name: 角色名
 
             Returns:
-                JSON 格式的角色节拍
+                格式化的角色档案文本
             """
-            names = [n.strip() for n in character_names.split(",") if n.strip()]
-            # 过滤已死亡角色
-            char_statuses = outline_ctx.get("character_statuses", {})
-            dead = {n for n, s in char_statuses.items() if s in ("dead", "deceased", "killed")}
-            alive_names = [n for n in names if n not in dead]
-            if len(alive_names) < len(names):
-                skipped = set(names) - set(alive_names)
-                logger.warning("sketch_character_beats: 跳过已死亡角色 %s", skipped)
-            names = alive_names
             graph = ctx.novel.story_graph if ctx.novel else None
+            if not graph:
+                return f"KG 不可用，无法查询 {name}"
 
-            char_info = {}
-            if graph:
-                for name in names[:8]:  # 最多 8 个角色
-                    person = kg.get_person(graph, name)
-                    if person:
-                        relations = kg.get_relations(graph, name)
-                        char_info[name] = {
-                            "role": person.role_type,
-                            "importance": person.importance,
-                            "status": person.status,
-                            "faction": person.faction,
-                            "relations": [
-                                {
-                                    "with": r.to_char if r.from_char == name else r.from_char,
-                                    "type": r.relation_type,
-                                    "intimacy": r.intimacy,
-                                }
-                                for r in relations[:5]
-                            ],
-                        }
+            person = graph.get_person_node(name) if hasattr(graph, 'get_person_node') else None
+            if not person:
+                return f"KG 中未找到角色「{name}」"
 
-            # 使用 LLM 规划节拍
-            try:
-                result = llm.chat_json(
-                    system_prompt="你是专业剧情规划师。为每个角色设计本章的情绪弧线和关键行动。只返回 JSON。",
-                    user_prompt=(
-                        f"角色信息:\n{json.dumps(char_info, ensure_ascii=False, indent=2)}\n\n"
-                        f"规划 {len(names)} 个角色在本章的情绪变化轨迹和关键行动。\n"
-                        f"返回 JSON: {{characters: {{角色名: {{arc, key_action, emotional_beat}}}} }}"
-                    ),
-                    temperature=0.5,
-                    max_tokens=2048,
-                )
-                if isinstance(result, dict):
-                    logger.info("sketch_character_beats 返回:\n%s",
-                                json.dumps(result, ensure_ascii=False, indent=2))
-                    return json.dumps(result, ensure_ascii=False)
-            except Exception:
-                pass
+            lines = [
+                f"角色: {name}",
+                f"状态: {char_statuses.get(name, person.status)}",
+                f"身份: {person.role_type}",
+                f"重要性: {person.importance}",
+                f"派系: {person.faction}",
+                f"简介: {person.description or '无'}",
+            ]
 
-            # Fallback
-            logger.warning("sketch_character_beats: LLM 失败，使用兜底")
-            fallback = {
-                name: {"arc": "持续推进", "key_action": "参与关键事件",
-                       "emotional_beat": "对事件做出反应"}
-                for name in names
-            }
-            return json.dumps({"characters": fallback}, ensure_ascii=False)
+            # 最后参与的事件
+            if hasattr(graph, 'character_events'):
+                events = graph.character_events(name)
+                if events:
+                    last = events[-1]
+                    lines.append(
+                        f"\n最后事件（第{last.get('chapter_start','?')}章）: "
+                        f"{last.get('name','?')} — {last.get('summary','')[:120]}"
+                    )
+
+            # 关系
+            if hasattr(graph, 'relationship_edges'):
+                rels = []
+                for edge in graph.relationship_edges:
+                    if edge.from_char == name:
+                        rels.append(
+                            f"对{edge.to_char}: {edge.relation_type}"
+                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else "")
+                        )
+                    elif edge.to_char == name:
+                        rels.append(
+                            f"被{edge.from_char}: {edge.relation_type}"
+                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else "")
+                        )
+                if rels:
+                    lines.append(f"关系: {'; '.join(rels[:5])}")
+
+            # 状态硬约束
+            status = char_statuses.get(name, person.status)
+            if status in ("dead", "deceased", "killed"):
+                lines.append("\n⚠️ 此角色已死亡！只能以回忆/闪回/他人提及出现。")
+            elif status == "missing":
+                lines.append("\n⚠️ 此角色下落不明！不能直接出场。")
+
+            # Voice 和行为边界（从蒸馏 Profile 注入）
+            profile = char_profiles.get(name)
+            if profile:
+                if hasattr(profile, 'voice') and profile.voice:
+                    v = profile.voice
+                    if v.summary:
+                        lines.append(f"\nVoice: {v.summary}")
+                    if v.taboo_words:
+                        lines.append(f"禁用词: {', '.join(v.taboo_words)}")
+                if hasattr(profile, 'boundary') and profile.boundary:
+                    b = profile.boundary
+                    if b.hard_rules:
+                        lines.append(f"硬底线: {', '.join(b.hard_rules[:5])}")
+
+            return "\n".join(lines)
 
         @tool
-        def plan_arc(arc_spec: str) -> str:
-            """规划 3-5 章的故事弧线，每章包含 3-6 个小节。
+        def lookup_roadmap() -> str:
+            """查看当前篇章路线图的状态和进度。
 
-            基于伏笔分析和角色节拍，设计连贯的多章叙事弧线。
-            每章有独立的主题，共同推进一个完整的故事段。
-
-            Args:
-                arc_spec: 角色节拍和伏笔分析的 JSON 摘要
+            返回当前路线图的标题、总章数、已完成/剩余里程碑数、
+            当前里程碑详情。如果路线图已用尽或不存在，会明确提示需要更新。
 
             Returns:
-                故事弧线 JSON（多章，每章多节）
+                格式化的路线图状态文本
             """
-            style = outline_ctx.get("style_summary", "")
-            prev_ending = outline_ctx.get("previous_chapter_ending", "")
-            instruction = outline_ctx.get("user_instruction", "")
-            last_ch = outline_ctx.get("last_chapter", 0)
+            store = self_ref._roadmap_store or {}
+            roadmap = store.get("data", {})
+            ch_idx = store.get("chapter_index", 0)
+            milestones = roadmap.get("milestones", [])
+
+            if not milestones:
+                return (
+                    "暂无篇章路线图。你需要使用 update_roadmap 工具创建新的 10-20 章路线图。"
+                    f"当前需要规划的是第 {store.get('next_chapter', '?')} 章。"
+                )
+
+            total = len(milestones)
+            remaining = total - ch_idx
+
+            lines = [
+                f"路线图: 《{roadmap.get('roadmap_title', '?')}》",
+                f"总章数: {roadmap.get('total_chapters', '?')}",
+                f"梗概: {roadmap.get('roadmap_synopsis', '')[:200]}",
+                f"进度: 已完成 {ch_idx}/{total} 个里程碑，剩余 {remaining} 个",
+            ]
+
+            if roadmap.get("major_themes"):
+                lines.append(f"核心主题: {', '.join(roadmap['major_themes'])}")
+            if roadmap.get("climax_milestone"):
+                lines.append(f"高潮在里程碑 #{roadmap['climax_milestone']}")
+            if roadmap.get("final_boss_hints"):
+                lines.append(f"最终Boss/冲突: {roadmap['final_boss_hints']}")
+
+            if ch_idx >= total:
+                lines.append("")
+                lines.append("⚠️ 路线图已全部完成！请使用 update_roadmap 工具设计新的 10-20 章路线图。")
+            else:
+                ms = milestones[ch_idx]
+                lines.append(f"\n当前里程碑 ({ch_idx + 1}/{total}): {ms.get('milestone_title', '?')}")
+                lines.append(f"  梗概: {ms.get('synopsis', '')}")
+                if ms.get("key_conflicts"):
+                    lines.append(f"  核心冲突: {', '.join(ms['key_conflicts'])}")
+                if ms.get("characters_involved"):
+                    lines.append(f"  涉及角色: {', '.join(ms['characters_involved'])}")
+                if ms.get("expected_tone"):
+                    lines.append(f"  预期基调: {ms['expected_tone']}")
+                if ms.get("thematic_focus"):
+                    lines.append(f"  主题焦点: {ms['thematic_focus']}")
+
+                # 显示后续里程碑概览
+                if remaining > 1:
+                    lines.append(f"\n后续里程碑预览:")
+                    for i in range(ch_idx + 1, min(ch_idx + 4, total)):
+                        future = milestones[i]
+                        lines.append(f"  #{i + 1} {future.get('milestone_title', '?')}: "
+                                     f"{future.get('synopsis', '')[:80]}")
+
+            return "\n".join(lines)
+
+        @tool
+        def update_roadmap(roadmap_json: str) -> str:
+            """创建或更新篇章路线图。用于设计 10-20 章的高层故事弧线。
+
+            当你发现路线图已用尽、用户指令改变了故事走向、或现有路线图不再适用时，
+            调用此工具来创建新的路线图。
+
+            Args:
+                roadmap_json: 路线图 JSON 字符串，格式为:
+                  {
+                    "type": "roadmap",
+                    "roadmap_title": "弧线名",
+                    "roadmap_synopsis": "整体走向",
+                    "total_chapters": 15,
+                    "milestones": [
+                      {"index": 1, "milestone_title": "...", "synopsis": "...",
+                       "key_conflicts": [...], "characters_involved": [...],
+                       "thematic_focus": "...", "expected_tone": "..."}
+                    ],
+                    "climax_milestone": 14,
+                    "final_boss_hints": "...",
+                    "major_themes": [...]
+                  }
+
+            Returns:
+                确认消息
+            """
+            store = self_ref._roadmap_store
+            if store is None:
+                return "错误：路线图存储未初始化"
 
             try:
-                result = llm.chat_json(
-                    system_prompt=(
-                        "你是专业的续写故事架构师。原文已经完结，你需要创作全新的后续故事。"
-                        "基于伏笔和角色现状，设计一个 3-5 章的故事弧线。每章拆分为 3-6 个小节。"
-                        "只返回 JSON。"
-                    ),
-                    user_prompt=(
-                        f"## 文风约束\n{style}\n\n"
-                        f"## 角色节拍 & 伏笔\n{arc_spec}\n\n"
-                        f"## 原文结尾\n{prev_ending[-1500:]}\n\n"
-                        + (f"## 用户指令\n{instruction}\n\n" if instruction else "")
-                        + f"从第 {last_ch + 1} 章开始，规划 3-5 章的故事弧线。返回 JSON:\n"
-                          f'{{\n'
-                          f'  "arc_title": "弧线名",\n'
-                          f'  "arc_synopsis": "整个弧线的梗概（100字内）",\n'
-                          f'  "chapters": [\n'
-                          f'    {{\n'
-                          f'      "chapter_number": {last_ch + 1},\n'
-                          f'      "title": "章节标题",\n'
-                          f'      "synopsis": "本章梗概",\n'
-                          f'      "tone": "基调",\n'
-                          f'      "sections": [\n'
-                          f'        {{"name": "opening", "goal": "本节目标", '
-                          f'"characters": ["角色"], "key_beats": ["情节点"], '
-                          f'"target_fragments": 8}},\n'
-                          f'        ...\n'
-                          f'      ]\n'
-                          f'    }},\n'
-                          f'    ...\n'
-                          f'  ],\n'
-                          f'  "plot_threads_advanced": ["推进的伏笔"],\n'
-                          f'  "plot_threads_introduced": ["新引入的悬念"]\n'
-                          f'}}'
-                    ),
-                    temperature=0.6,
-                    max_tokens=2048,
-                )
-                if isinstance(result, dict):
-                    logger.info("plan_arc 返回:\n%s",
-                                json.dumps(result, ensure_ascii=False, indent=2))
-                    result.setdefault("chapter_number", last_ch + 1)
-                    result.setdefault("status", "ok")
-                    return json.dumps(result, ensure_ascii=False)
-            except Exception as e:
-                logger.warning("plan_arc LLM 调用失败，使用兜底方案: %s", e)
+                new_roadmap = json.loads(roadmap_json)
+            except json.JSONDecodeError as e:
+                return f"错误：路线图 JSON 解析失败: {e}"
 
-            return json.dumps({
-                "arc_title": "续",
-                "arc_synopsis": "继续推进故事",
-                "chapters": [{
-                    "chapter_number": last_ch + 1,
-                    "title": "续",
-                    "synopsis": "继续推进故事",
-                    "tone": "保持原作风格",
-                    "sections": [
-                        {"name": "opening", "goal": "衔接上一章结尾",
-                         "characters": [], "key_beats": ["开场"], "target_fragments": 5},
-                        {"name": "rising", "goal": "推进冲突",
-                         "characters": [], "key_beats": ["推进"], "target_fragments": 6},
-                        {"name": "climax", "goal": "关键转折",
-                         "characters": [], "key_beats": ["高潮"], "target_fragments": 5},
-                        {"name": "hook", "goal": "章尾悬念",
-                         "characters": [], "key_beats": ["悬念"], "target_fragments": 3},
-                    ],
-                }],
-                "plot_threads_advanced": [],
-                "plot_threads_introduced": [],
-                "status": "ok",
-            }, ensure_ascii=False)
+            if not isinstance(new_roadmap, dict):
+                return "错误：路线图必须是 JSON 对象"
+
+            if "milestones" not in new_roadmap:
+                return "错误：路线图必须包含 milestones 数组"
+
+            store["data"] = new_roadmap
+            store["chapter_index"] = 0
+            store["dirty"] = True
+
+            ms_count = len(new_roadmap.get("milestones", []))
+            return (
+                f"路线图已更新: 《{new_roadmap.get('roadmap_title', '?')}》"
+                f" — {ms_count} 个里程碑。"
+                f"当前进度已重置为第 1 个里程碑: "
+                f"{new_roadmap['milestones'][0].get('milestone_title', '?')}"
+            )
 
         return [
-            analyze_hanging_threads,
-            sketch_character_beats,
-            plan_arc,
+            lookup_roadmap,
+            update_roadmap,
+            gather_hanging_threads,
+            gather_active_conflicts,
+            lookup_character,
         ]
