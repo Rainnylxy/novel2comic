@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 """BaseAgent —— Agent 抽象基类。
 
-支持固定身份 system prompt + AgentFlow 集成。
+支持 AgentFlow 集成 + skill 延迟加载 + 追踪日志。
 """
 
+import logging
 import os
 from typing import Optional, TYPE_CHECKING
 
 from agentflow.runtime.builder import AgentBuilder
 from agentflow.runtime.memory.manager import MemoryProfile, WorkingConfig
 from agentflow.runtime.thinking import ThinkingMode
+from agentflow.runtime.hooks import StreamEvent
 
 from ..agent_memory import AgentMemory
 
@@ -22,12 +24,23 @@ SKILLS_DIR = os.path.join(
     "skills",
 )
 
+# Agent 追踪日志
+_trace_logger = logging.getLogger("agentflow.trace")
+if not _trace_logger.handlers:
+    _fh = logging.FileHandler("agent_trace.log", encoding="utf-8")
+    _fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    ))
+    _trace_logger.addHandler(_fh)
+    _trace_logger.setLevel(logging.DEBUG)
+
 
 class BaseAgent:
     """Agent 抽象基类。
 
     关键字段:
-    - _identity_prompt: 固定身份 prompt，非空时替换 skill 内容作为 system prompt
+    - _identity_prompt: 固定身份 prompt，非空时叠加到 with_prompt
     - _built_agent: 当前 AgentFlow agent 实例
     """
 
@@ -98,34 +111,34 @@ class BaseAgent:
 
     # ── Agent 构建 ──
 
-    def _build_system_prompt(self) -> str:
-        if self._identity_prompt:
-            return self._identity_prompt
-
-        skill_path = self._get_skill_path()
-        if os.path.exists(skill_path):
-            with open(skill_path, "r", encoding="utf-8") as f:
-                return f.read()
-        return ""
-
     async def build(self):
         if not self.SKILL_NAME:
             raise ValueError("SKILL_NAME 未设置")
 
         tools = self._build_tools()
-        system_prompt = self._build_system_prompt()
+        tool_names = [getattr(t, '__name__', str(t)) for t in tools]
 
         builder = (
             AgentBuilder(self.SKILL_NAME)
             .with_llm(self._ctx.agent_llm)
-            .with_prompt(system_prompt)
+            .with_skills_dir(SKILLS_DIR)
+            .with_skill(self.SKILL_NAME)
             .with_tools(*tools)
             .with_memory(self._get_memory_profile())
             .with_thinking(ThinkingMode.REACT)
             .with_max_iterations(15)
         )
 
-        return await builder.build()
+        if self._identity_prompt:
+            builder = builder.with_prompt(self._identity_prompt)
+
+        agent = await builder.build()
+
+        # 追踪：构建信息
+        _trace_logger.info("[%s] build: skill=%s tools=%s max_iter=15",
+                           self.SKILL_NAME, self.SKILL_NAME, tool_names)
+
+        return agent
 
     async def rebuild(self):
         old_messages = []
@@ -141,13 +154,55 @@ class BaseAgent:
             if msg.role != "system":
                 self._built_agent.memory.working.add(msg)
 
+    # ── 追踪日志 ──
+
+    def _trace_stream(self, event: StreamEvent):
+        """Stream 回调：记录 AgentFlow ReAct 循环中的每个事件。"""
+        etype = event.type
+        if etype == "thinking":
+            content = (event.content or "")[:200]
+            _trace_logger.info("[%s] turn=%s thinking: %.200s",
+                               self.SKILL_NAME, getattr(event, 'turn', '?'), content)
+        elif etype == "tool_call":
+            name = getattr(event, 'tool_name', '') or event.data.get('name', '?')
+            args = event.data.get('args', {}) if event.data else {}
+            args_str = str(args)[:300]
+            _trace_logger.info("[%s] turn=%s tool_call: %s(%s)",
+                               self.SKILL_NAME, getattr(event, 'turn', '?'), name, args_str)
+        elif etype == "tool_result":
+            name = getattr(event, 'tool_name', '') or event.data.get('name', '?')
+            result = (event.content or "")[:300]
+            _trace_logger.info("[%s] turn=%s tool_result: %s → %.300s",
+                               self.SKILL_NAME, getattr(event, 'turn', '?'), name, result)
+        elif etype == "final":
+            _trace_logger.info("[%s] turn=%s final: %.300s",
+                               self.SKILL_NAME, getattr(event, 'turn', '?'),
+                               (event.content or "")[:300])
+        elif etype == "error":
+            _trace_logger.error("[%s] turn=%s error: %s",
+                                self.SKILL_NAME, getattr(event, 'turn', '?'),
+                                event.content or "")
+        elif etype == "progress":
+            _trace_logger.debug("[%s] progress: %s", self.SKILL_NAME, event.content or "")
+        else:
+            _trace_logger.debug("[%s] event=%s content=%.200s",
+                                self.SKILL_NAME, etype, (event.content or "")[:200])
+
+    # ── 运行 ──
+
     async def run(self, task: str):
         if self._built_agent is None:
             self._built_agent = await self.build()
         elif self._needs_rebuild:
             await self.rebuild()
             self._needs_rebuild = False
-        result = await self._built_agent.run(task)
+
+        _trace_logger.info("[%s] >>> task: %.300s", self.SKILL_NAME, task)
+
+        result = await self._built_agent.run(task, stream=self._trace_stream)
+
+        _trace_logger.info("[%s] <<< done", self.SKILL_NAME)
+
         # Post-turn 钩子：子类可覆盖以写入 episodic memory 等
         self._on_post_turn(task, result)
         return result

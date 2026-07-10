@@ -2,14 +2,14 @@
 """ChapterWriter —— 章节写手 Agent（AgentFlow ReAct 模式）。
 
 逐节写作，AgentFlow 自动管理上下文窗口:
-  - System Prompt: 文风约束 + 输出格式（缓存）
-  - WorkingMemory: 大纲 + 已写章节（滑动窗口）
-  - Tools: lookup_character / recall_foreshadowing / write_section
+  - System Prompt: skills/chapter_writer.md（缓存）
+  - Dynamic Prefix: 角色状态硬约束 + 文风概要（Push）
+  - Tools: lookup_character / recall_foreshadowing（Pull）
 
 流程:
-  Thought → 分析大纲 → write_section("opening") → 流式输出 →
-  Thought → lookup_character("金杰") → 确认状态 →
-  Thought → write_section("rising") → 流式输出 → ...
+  Thought → 分析本节目标 → lookup_character("江停") → 确认 Voice/边界 →
+  Thought → recall_foreshadowing() → 提取伏笔 →
+  Thought → 写本节 3-6 个 StoryFragment → 自然终止
 """
 
 import json
@@ -49,6 +49,9 @@ class ChapterWriter(BaseAgent):
         self._character_profiles: dict = {}
         self._character_statuses: dict = {}
         self._graph = None
+
+        # 角色查询缓存（同章内避免重复查 KG，set_context 时清空）
+        self._lookup_cache: dict = {}
 
         # 流式输出队列
         self._fragment_queue: asyncio.Queue = asyncio.Queue()
@@ -90,65 +93,39 @@ class ChapterWriter(BaseAgent):
         self._character_profiles = character_profiles or {}
         self._character_statuses = character_statuses or {}
         self._graph = graph
+        self._lookup_cache.clear()  # 新章重置角色查询缓存
+        # System prompt 来自 skills/chapter_writer.md（AgentFlow 缓存）
+        # 动态上下文通过 _build_dynamic_prefix() 注入 task
 
-        # 构建 system prompt（会被 AgentFlow 缓存）
-        self.set_identity(self._build_system_prompt())
+    def _build_dynamic_prefix(self) -> str:
+        """构建 Push 上下文（拼接到 task 前，不缓存）。
 
-    def _build_system_prompt(self) -> str:
-        """构建 Writer 的 system prompt（缓存，不随小节变化）。
-
-        Push（锚点）: 角色状态硬约束 + 风格核心标签
-        Pull（工具）: 角色 Voice/Boundary → lookup_character(name)
+        只包含变化的数据：角色状态硬约束 + 风格概要。
+        角色 Voice/Boundary 细节通过 lookup_character 工具 Pull。
         """
-        parts = [
-            "## 角色",
-            "你是专业小说续写者。原文已完结，你写的是全新的后续故事，不是补全。"
-            "每次调用你只写一个小节（3-6个 StoryFragment），向前推进剧情。",
-            "",
-            "## 工作流程",
-            "1. 阅读本节目标和情节点",
-            "2. **先用 lookup_character(name) 查询本节涉及角色的 Voice 和行为边界**",
-            "3. 如有伏笔需要 → recall_foreshadowing",
-            "4. 写本节内容（3-6 个 StoryFragment JSON）",
-            "5. 自然终止 —— 不要嵌套调用工具",
-            "",
-            "## 输出格式",
-            "以 StoryFragment JSON 格式逐行输出:",
-            '  {"type": "narration", "text": "旁白/叙述文本..."}',
-            '  {"type": "dialogue", "character": "角色名", "text": "对话内容..."}',
-            '  {"type": "action", "character": "角色名", "text": "动作描写..."}',
-            '  {"type": "inner_thought", "character": "角色名", "text": "内心独白..."}',
-            '  {"type": "divider", "text": "", "divider_label": "时间/地点标签"}',
-            "",
-            "## 规则",
-            "1. dialogue/action/inner_thought 的 character 必须用原文中的准确角色名",
-            "2. 对话和动作交替推进，不要连续输出太长的 narration",
-            "3. 保持原作叙事风格和角色性格一致性",
-            "4. 写角色之前必须 lookup_character 确认其 Voice 和边界",
-            "5. 每节写 3-6 段片段即可，不要一节写太多",
-        ]
+        parts = []
 
-        # 注入角色生死状态（硬约束 —— Push）
+        # 角色生死状态（硬约束 —— Push）
         if self._character_statuses:
             dead_chars = [n for n, s in self._character_statuses.items()
                           if s in ("dead", "deceased", "killed")]
             missing_chars = [n for n, s in self._character_statuses.items()
                              if s == "missing"]
             if dead_chars:
-                parts.append(f"\n## ⚠️ 已死亡角色: {', '.join(dead_chars)}")
+                parts.append(f"## ⚠️ 已死亡角色: {', '.join(dead_chars)}")
                 parts.append("只能以回忆/闪回/他人提及出现，绝不能写他们的对话或动作。")
             if missing_chars:
-                parts.append(f"\n## ⚠️ 下落不明角色: {', '.join(missing_chars)}")
+                parts.append(f"## ⚠️ 下落不明角色: {', '.join(missing_chars)}")
                 parts.append("不能直接出场，只能通过线索/回忆间接涉及。")
 
-        # 注入文风概要（轻量 Push —— 只给核心标签）
+        # 文风概要（轻量 Push）
         if self._style_profile:
-            parts.append("\n" + self._style_profile.summary())
+            parts.append(self._style_profile.summary())
             exemplars_text = self._style_profile.exemplars_text()
             if exemplars_text:
-                parts.append("\n" + exemplars_text)
+                parts.append(exemplars_text)
 
-        return "\n".join(parts)
+        return "\n".join(parts) if parts else ""
 
     # ================================================================
     # 流式接口（供 Pipeline 调用）
@@ -169,8 +146,10 @@ class ChapterWriter(BaseAgent):
         """
         from .fragment import StoryFragment
 
-        # 构建 user prompt（本章上下文 + 本节信息）
-        task = self._build_user_prompt(section, section_index)
+        # 构建完整 task: 动态前缀（Push 上下文）+ 用户 prompt（本章+本节信息）
+        user_prompt = self._build_user_prompt(section, section_index)
+        prefix = self._build_dynamic_prefix()
+        task = (prefix + "\n\n" + user_prompt) if prefix else user_prompt
         self._fragment_queue = asyncio.Queue()
 
         # 启动 AgentFlow ReAct 循环（异步，结果通过 queue 流出）
@@ -274,6 +253,7 @@ class ChapterWriter(BaseAgent):
     # ================================================================
 
     def _build_tools(self) -> list:
+        self_ref = self  # 闭包引用，动态读取 _lookup_cache 等字段
         ctx = self._ctx
         kg = self._kg
         graph = self._graph
@@ -296,6 +276,11 @@ class ChapterWriter(BaseAgent):
             Returns:
                 角色的 KG 信息摘要
             """
+            # 同章缓存：已查过的角色直接返回，避免重复查询 KG
+            cached = self_ref._lookup_cache.get(name)
+            if cached is not None:
+                return cached
+
             if not graph:
                 return f"KG 不可用，无法查询 {name}"
 
@@ -343,20 +328,82 @@ class ChapterWriter(BaseAgent):
             elif status == "missing":
                 lines.append("\n⚠️ 此角色下落不明！不能直接出场。")
 
-            # Voice 约束 + 行为边界（按需 Pull，不从 system prompt 推送）
+            # 角色蒸馏档案（按需 Pull，不从 system prompt 推送）
             profile = char_profiles.get(name)
-            if profile and hasattr(profile, 'voice') and profile.voice:
-                v = profile.voice
-                if v.summary:
-                    lines.append(f"Voice: {v.summary}")
-                if v.taboo_words:
-                    lines.append(f"禁用词: {', '.join(v.taboo_words)}")
-            if profile and hasattr(profile, 'boundary') and profile.boundary:
-                b = profile.boundary
-                if b.hard_rules:
-                    lines.append(f"硬底线: {', '.join(b.hard_rules[:5])}")
+            if profile:
+                # Voice: 语气 + 句式 + 禁忌
+                if hasattr(profile, 'voice') and profile.voice:
+                    v = profile.voice
+                    if v.summary:
+                        lines.append(f"\nVoice: {v.summary}")
+                    # 语气光谱
+                    tone_parts = []
+                    if v.tone_cold_warm:
+                        tone_parts.append(f"冷暖={v.tone_cold_warm:.1f}")
+                    if v.tone_hard_soft:
+                        tone_parts.append(f"硬软={v.tone_hard_soft:.1f}")
+                    if v.tone_distant_close:
+                        tone_parts.append(f"疏近={v.tone_distant_close:.1f}")
+                    if tone_parts:
+                        lines.append(f"语气光谱: {', '.join(tone_parts)} (0=冷/硬/疏, 1=暖/软/近)")
+                    if v.rhythm:
+                        lines.append(f"说话节奏: {v.rhythm}")
+                    if v.response_pattern:
+                        lines.append(f"回应模式: {v.response_pattern}")
+                    if v.taboo_words:
+                        lines.append(f"禁用词: {', '.join(v.taboo_words)}")
+                    if v.taboo_patterns:
+                        lines.append(f"禁用句式: {', '.join(v.taboo_patterns)}")
+                    # 对不同对象的表达差异
+                    if v.voice_shift:
+                        shifts = [f"对{k}: {vv}" for k, vv in v.voice_shift.items()]
+                        if shifts:
+                            lines.append(f"表达差异: {'; '.join(shifts[:5])}")
 
-            return "\n".join(lines)
+                # Boundary: 硬底线 + 行为倾向 + 关系行为
+                if hasattr(profile, 'boundary') and profile.boundary:
+                    b = profile.boundary
+                    if b.hard_rules:
+                        lines.append(f"硬底线: {', '.join(b.hard_rules[:5])}")
+                    if b.tendencies:
+                        lines.append(f"行为倾向: {', '.join(b.tendencies[:5])}")
+                    if b.relationship_behaviors:
+                        rb = [f"对{k}: {v}" for k, v in b.relationship_behaviors.items()]
+                        if rb:
+                            lines.append(f"关系行为: {'; '.join(rb[:5])}")
+
+                # Sensitivity: 敏感触发点
+                if hasattr(profile, 'sensitivity') and profile.sensitivity:
+                    entries = profile.sensitivity.entries
+                    if entries:
+                        lines.append(f"敏感触发 ({len(entries)}项):")
+                        for e in entries[:3]:
+                            triggers = ', '.join(e.triggers[:3]) if hasattr(e, 'triggers') else ''
+                            effects = str(e.effects)[:80] if hasattr(e, 'effects') else ''
+                            if triggers:
+                                lines.append(f"  · {triggers} → {effects}")
+
+                # Policy Anchors: 典型行为模式
+                if hasattr(profile, 'policy_anchors') and profile.policy_anchors:
+                    anchors = profile.policy_anchors
+                    if anchors:
+                        lines.append(f"行为锚点 ({len(anchors)}个):")
+                        for a in anchors[:3]:
+                            situation = getattr(a, 'situation', '') or ''
+                            action = getattr(a, 'action', '') or ''
+                            if situation and action:
+                                lines.append(f"  · {situation} → {action}")
+
+                # State: 心理基线
+                if hasattr(profile, 'state') and profile.state:
+                    baseline = profile.state.baseline
+                    if baseline:
+                        base_str = ', '.join(f"{k}={v}" for k, v in list(baseline.items())[:5])
+                        lines.append(f"心理基线: {base_str}")
+
+            result = "\n".join(lines)
+            self_ref._lookup_cache[name] = result  # 缓存，同章内复用
+            return result
 
         @tool
         def recall_foreshadowing() -> str:
@@ -389,28 +436,9 @@ class ChapterWriter(BaseAgent):
                 f"- {h}" for h in hanging[:10]
             )
 
-        @tool
-        def write_section(section_name: str, goal: str) -> str:
-            """写一个章节段落。
-
-            根据大纲中本节的 goal 来写。每节 3-6 个 StoryFragment。
-            写完后自然结束（不要再嵌套调用工具）。
-
-            Args:
-                section_name: 段落名（opening/rising/climax/hook）
-                goal: 本节要完成的叙事目标
-
-            Returns:
-                已写的片段数量
-            """
-            # 这个方法只是一个标记——AgentFlow LLM 会在自然终止时输出内容
-            # 实际的片段解析由 _on_post_turn 完成
-            return f"开始写 {section_name}: {goal[:100]}"
-
         return [
             lookup_character,
             recall_foreshadowing,
-            write_section,
         ]
 
     # ================================================================

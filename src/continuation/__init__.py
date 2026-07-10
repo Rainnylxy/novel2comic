@@ -3,20 +3,18 @@
 
 组件:
   - AuthorStyleDistiller: 作者文风蒸馏
-  - PlotArchitect: 剧情架构师
+  - PlotArchitect: 剧情架构师（两级规划）
   - ChapterWriter: 章节写手（流式核心）
-  - ConsistencyReviewer: 一致性审校
-  - RevisionEditor: 修订编辑
+  - ReviewEditor: 审校 + 修订（合并）
   - ContinuationPipeline: 流水线编排器
 """
 
 from .chapter_writer import ChapterWriter
-from .consistency_reviewer import ConsistencyReviewer
-from .revision_editor import RevisionEditor
+from .revision_editor import ReviewEditor
 from .plot_architect import PlotArchitect
 from .pipeline import ContinuationPipeline
 
 __all__ = [
-    "ChapterWriter", "ConsistencyReviewer", "RevisionEditor",
+    "ChapterWriter", "ReviewEditor",
     "PlotArchitect", "ContinuationPipeline",
 ]

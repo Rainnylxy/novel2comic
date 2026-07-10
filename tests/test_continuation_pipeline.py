@@ -95,22 +95,22 @@ class TestPipelineFlow:
         mock_writer = MagicMock()
         mock_fragment = StoryFragment(type="narration", text="测试叙述。")
         mock_writer.stream = lambda *args, **kwargs: async_gen([mock_fragment])
-        mock_reviewer = MagicMock()
-        mock_reviewer.run = AsyncMock(return_value=json.dumps({
-            "issues": [], "overall_score": 8.0,
+        mock_review_editor = MagicMock()
+        mock_review_editor.run = AsyncMock(return_value=json.dumps({
+            "revised_fragments": [{"type": "narration", "text": "测试叙述。"}],
+            "changes": [],
+            "overall_score": 8.0,
         }))
-        mock_editor = MagicMock()
 
         pipeline.architect = mock_architect
         pipeline.writer = mock_writer
-        pipeline.reviewer = mock_reviewer
-        pipeline.editor = mock_editor
+        pipeline.review_editor = mock_review_editor
 
         events = []
         async for event in pipeline.run("test instruction"):
             events.append(event)
 
-        # 检查事件序列
+        # 检查事件序列（3 阶段：planning + writing + review）
         event_types = [e.event_type for e in events]
         assert "phase" in event_types
         assert "outline" in event_types

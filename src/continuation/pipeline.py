@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """ContinuationPipeline —— 续写流水线编排器。
 
-串联 4 个 Agent:
-  ① Plot Architect → 生成大纲
+串联 3 个 Agent:
+  ① Plot Architect → 两级规划（篇章路线图 + 章节大纲）
   ② Chapter Writer → 流式写作（核心）
-  ③ Consistency Reviewer → 审校（异步，不阻塞前端）
-  ④ Revision Editor → 修订（异步，不阻塞前端）
+  ③ Review Editor → 审校 + 修订（一次调用完成）
 
 管理 SSE 事件总线，通过 AsyncGenerator 将事件推送到 HTTP handler。
 """
@@ -19,8 +18,7 @@ from typing import AsyncGenerator, Optional, TYPE_CHECKING
 from .fragment import PipelineEvent, StoryFragment
 from .plot_architect import PlotArchitect, make_fallback_chapter, make_fallback_roadmap
 from .chapter_writer import ChapterWriter
-from .consistency_reviewer import ConsistencyReviewer
-from .revision_editor import RevisionEditor
+from .revision_editor import ReviewEditor
 
 if TYPE_CHECKING:
     from ..context import GlobalContext, ServiceRegistry
@@ -45,11 +43,10 @@ class ContinuationPipeline:
         self._llm = llm
         self._kg = services.kg
 
-        # 4 个 Agent
+        # 3 个 Agent
         self.architect: Optional[PlotArchitect] = None
         self.writer: Optional[ChapterWriter] = None
-        self.reviewer: Optional[ConsistencyReviewer] = None
-        self.editor: Optional[RevisionEditor] = None
+        self.review_editor: Optional[ReviewEditor] = None
 
         # 状态
         self._phase: str = "idle"
@@ -504,11 +501,10 @@ class ContinuationPipeline:
         return 0
 
     def _init_agents(self):
-        """初始化 4 个 Agent。"""
+        """初始化 3 个 Agent。"""
         self.architect = PlotArchitect(self._ctx, self._services, self._llm)
         self.writer = ChapterWriter(self._ctx, self._services, self._llm)
-        self.reviewer = ConsistencyReviewer(self._ctx, self._services, self._llm)
-        self.editor = RevisionEditor(self._ctx, self._services, self._llm)
+        self.review_editor = ReviewEditor(self._ctx, self._services, self._llm)
 
     async def run(self, instruction: str = "") -> AsyncGenerator[PipelineEvent, None]:
         """运行续写流水线。
@@ -519,7 +515,7 @@ class ContinuationPipeline:
         Yields:
             PipelineEvent: 每个事件通过 SSE 推送
         """
-        if not self.architect or not self.writer:
+        if not self.architect or not self.writer or not self.review_editor:
             raise RuntimeError("请先调用 load_novel() 加载小说")
 
         need_plan = not self._pending_arc or self._arc_chapter_index >= len(
@@ -624,7 +620,7 @@ class ContinuationPipeline:
                   f"{section.get('goal', '')[:50]}")
 
             section_text = json.dumps(section, ensure_ascii=False)
-            self._verify_characters_in_text(section_text)
+            # self._verify_characters_in_text(section_text)
 
             async for fragment in self.writer.stream(section, section_index=i):
                 draft_fragments.append(fragment)
@@ -648,44 +644,40 @@ class ContinuationPipeline:
         if project_dir:
             self._save_roadmap_index(project_dir, self._roadmap_chapter_index)
 
-        # —— 阶段 3: 审校 ——
+        # —— 阶段 3: 审校 + 修订（合并为一次调用） ——
         self._phase = "reviewing"
-        print(f"[Phase 3/4] 一致性审校 — Reviewer 正在对照 KG 检查草稿...")
+        print(f"[Phase 3/3] 审校修订 — Review Editor 检查草稿并修正问题...")
         yield PipelineEvent("phase", {"phase": "reviewing"})
 
-        self.reviewer.set_context(
+        self.review_editor.set_context(
             draft_fragments=draft_fragments,
             character_profiles=self._character_profiles,
             style_profile=self._style_profile,
         )
-        review_result_raw = await self.reviewer.run("审校草稿")
-        issues = self._parse_review(review_result_raw)
-        yield PipelineEvent("review", issues)
-        issue_count = len(issues.get("issues", []))
-        score = issues.get("overall_score", "?")
-        if issue_count > 0:
-            print(f"  审校发现 {issue_count} 个问题 (评分: {score})")
-        else:
-            print(f"  审校通过 (评分: {score})")
+        result_raw = await self.review_editor.run("审校并修订草稿")
+        result = self._parse_review_result(result_raw)
 
-        # —— 阶段 4: 修订 ——
-        self._phase = "revising"
-        print(f"[Phase 4/4] 修订 — Editor 正在根据审校意见修改草稿...")
-        yield PipelineEvent("phase", {"phase": "revising"})
+        changes = result.get("changes", [])
+        score = result.get("overall_score", "?")
+        revised = result.get("revised_fragments",
+                             [f.to_dict() for f in draft_fragments])
 
-        if issues.get("issues"):
-            revision_input = json.dumps({
-                "draft": [f.to_dict() for f in draft_fragments],
-                "issues": issues["issues"],
-            })
-            revision_result_raw = await self.editor.run(revision_input)
-            revised = self._parse_revision(revision_result_raw)
-            yield PipelineEvent("complete", revised)
+        if changes:
+            print(f"  审校修订完成: {len(changes)} 处修改 (评分: {score})")
         else:
-            yield PipelineEvent("complete", {
-                "fragments": [f.to_dict() for f in draft_fragments],
-                "changes": [],
-            })
+            print(f"  审校通过，无需修改 (评分: {score})")
+
+        yield PipelineEvent("review", {
+            "issues": [{"type": c.get("reason", ""), "severity": "fixed",
+                        "description": c.get("original", "")[:80],
+                        "suggestion": c.get("revised", "")[:80]}
+                       for c in changes],
+            "overall_score": score,
+        })
+        yield PipelineEvent("complete", {
+            "revised_fragments": revised,
+            "changes": changes,
+        })
 
         # 完成
         self._phase = "idle"
@@ -846,25 +838,16 @@ class ContinuationPipeline:
         except Exception:
             pass
 
-    def _parse_review(self, raw: str) -> dict:
-        """从 Reviewer 输出中解析问题列表。"""
+    def _parse_review_result(self, raw) -> dict:
+        """解析 ReviewEditor 输出：{revised_fragments, changes, overall_score}。"""
         if isinstance(raw, dict):
             return raw
         try:
-            return json.loads(str(raw).strip())
-        except json.JSONDecodeError:
+            text = raw.output if hasattr(raw, 'output') else str(raw)
+            return json.loads(text.strip())
+        except (json.JSONDecodeError, AttributeError):
             pass
-        return {"issues": [], "overall_score": 0}
-
-    def _parse_revision(self, raw: str) -> dict:
-        """从 Editor 输出中解析修订结果。"""
-        if isinstance(raw, dict):
-            return raw
-        try:
-            return json.loads(str(raw).strip())
-        except json.JSONDecodeError:
-            pass
-        return {"revised_fragments": [], "changes": [], "status": "parse_failed"}
+        return {"revised_fragments": [], "changes": [], "overall_score": 0}
 
     def _find_cached_project(self, base_name: str, expected_chapters: int):
         """在 projects 目录查找已缓存的 novel.json。

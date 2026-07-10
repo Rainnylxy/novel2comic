@@ -544,19 +544,76 @@ class PlotArchitect(BaseAgent):
             elif status == "missing":
                 lines.append("\n⚠️ 此角色下落不明！不能直接出场。")
 
-            # Voice 和行为边界（从蒸馏 Profile 注入）
+            # 角色蒸馏档案（Voice + Boundary + Sensitivity + Anchors）
             profile = char_profiles.get(name)
             if profile:
+                # Voice: 语气光谱 + 句式 + 禁忌
                 if hasattr(profile, 'voice') and profile.voice:
                     v = profile.voice
                     if v.summary:
                         lines.append(f"\nVoice: {v.summary}")
+                    tone_parts = []
+                    if v.tone_cold_warm:
+                        tone_parts.append(f"冷暖={v.tone_cold_warm:.1f}")
+                    if v.tone_hard_soft:
+                        tone_parts.append(f"硬软={v.tone_hard_soft:.1f}")
+                    if v.tone_distant_close:
+                        tone_parts.append(f"疏近={v.tone_distant_close:.1f}")
+                    if tone_parts:
+                        lines.append(f"语气光谱: {', '.join(tone_parts)}")
+                    if v.rhythm:
+                        lines.append(f"节奏: {v.rhythm}")
+                    if v.response_pattern:
+                        lines.append(f"回应模式: {v.response_pattern}")
                     if v.taboo_words:
                         lines.append(f"禁用词: {', '.join(v.taboo_words)}")
+                    if v.taboo_patterns:
+                        lines.append(f"禁用句式: {', '.join(v.taboo_patterns)}")
+                    if v.voice_shift:
+                        shifts = [f"对{k}: {vv}" for k, vv in v.voice_shift.items()]
+                        if shifts:
+                            lines.append(f"表达差异: {'; '.join(shifts[:5])}")
+
+                # Boundary: 硬底线 + 行为倾向 + 关系行为
                 if hasattr(profile, 'boundary') and profile.boundary:
                     b = profile.boundary
                     if b.hard_rules:
                         lines.append(f"硬底线: {', '.join(b.hard_rules[:5])}")
+                    if b.tendencies:
+                        lines.append(f"行为倾向: {', '.join(b.tendencies[:5])}")
+                    if b.relationship_behaviors:
+                        rb = [f"对{k}: {v}" for k, v in b.relationship_behaviors.items()]
+                        if rb:
+                            lines.append(f"关系行为: {'; '.join(rb[:5])}")
+
+                # Sensitivity: 敏感触发点
+                if hasattr(profile, 'sensitivity') and profile.sensitivity:
+                    entries = profile.sensitivity.entries
+                    if entries:
+                        lines.append(f"敏感触发 ({len(entries)}项):")
+                        for e in entries[:3]:
+                            triggers = ', '.join(e.triggers[:3]) if hasattr(e, 'triggers') else ''
+                            effects = str(e.effects)[:80] if hasattr(e, 'effects') else ''
+                            if triggers:
+                                lines.append(f"  · {triggers} → {effects}")
+
+                # Policy Anchors: 情境→行动
+                if hasattr(profile, 'policy_anchors') and profile.policy_anchors:
+                    anchors = profile.policy_anchors
+                    if anchors:
+                        lines.append(f"行为锚点 ({len(anchors)}个):")
+                        for a in anchors[:3]:
+                            s = getattr(a, 'situation', '') or ''
+                            act = getattr(a, 'action', '') or ''
+                            if s and act:
+                                lines.append(f"  · {s} → {act}")
+
+                # State: 心理基线
+                if hasattr(profile, 'state') and profile.state:
+                    baseline = profile.state.baseline
+                    if baseline:
+                        base_str = ', '.join(f"{k}={v}" for k, v in list(baseline.items())[:5])
+                        lines.append(f"心理基线: {base_str}")
 
             return "\n".join(lines)
 
