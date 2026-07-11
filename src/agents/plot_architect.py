@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Optional
 
 from agentflow.runtime.toolkit import tool
 
-from ..agents.base_agent import BaseAgent
+from .base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -34,12 +34,15 @@ if not logger.handlers:
         datefmt="%H:%M:%S",
     ))
     logger.addHandler(_fh)
+    _sh = logging.StreamHandler()
+    _sh.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    logger.addHandler(_sh)
     logger.setLevel(logging.INFO)
 
 if TYPE_CHECKING:
-    from ..context import GlobalContext, ServiceRegistry
-    from ..llm import UnifiedLLM
-    from .author_style_profile import AuthorStyleProfile
+    from ..core.context import GlobalContext, ServiceRegistry
+    from ..core.llm import UnifiedLLM
+    from ..distillers.style_profile import AuthorStyleProfile
 
 
 # ============================================================
@@ -66,7 +69,6 @@ def make_fallback_chapter(chapter_number: int) -> dict:
             {"name": "hook", "goal": "章尾悬念", "characters": [],
              "key_beats": ["悬念"], "target_fragments": 3},
         ],
-        "plot_threads_advanced": [],
         "plot_threads_introduced": [],
     }
 
@@ -90,7 +92,6 @@ def make_fallback_roadmap(chapter: int) -> dict:
         "climax_milestone": 1,
         "final_boss_hints": "",
         "major_themes": [],
-        "plot_threads_advanced": [],
         "plot_threads_introduced": [],
         "status": "fallback",
     }
@@ -145,6 +146,12 @@ class PlotArchitect(BaseAgent):
         self._status_fixes: dict = {}
         self._novel_text: str = ""
 
+        # 前序章节规划摘要（Pipeline 累积传入，避免重复分析）
+        self._previous_chapter_plans: list[dict] = []
+
+        # 应用层故事记忆（Pipeline 传入，Architect 只读引用）
+        self._story_memory: Optional[object] = None
+
     # ================================================================
     # 上下文设置
     # ================================================================
@@ -161,6 +168,8 @@ class PlotArchitect(BaseAgent):
         status_verified: set = None,
         status_fixes: dict = None,
         novel_text: str = "",
+        previous_chapter_plans: list = None,
+        story_memory: object = None,
     ):
         """设置运行时上下文。在每次 run() 前由 Pipeline 调用。
 
@@ -171,6 +180,9 @@ class PlotArchitect(BaseAgent):
                              Agent 通过 verify_character 工具读写。
             status_fixes: 共享可变 dict {name: status}，验证后的状态修正。
             novel_text: 小说全文（用于角色出场章节定位）。
+            previous_chapter_plans: 前序章节规划摘要列表 [{ch, title, synopsis, key_events}],
+                                    让 Agent 知道已规划过的内容。
+            story_memory: StoryMemory 实例（只读引用），包含故事摘要、角色弧线、冲突等。
 
         不调 set_identity() —— system prompt 来自 skill 文件（缓存），
         动态上下文通过 run() 中的 _build_dynamic_prefix() 注入。
@@ -185,6 +197,21 @@ class PlotArchitect(BaseAgent):
         self._status_verified = status_verified or set()
         self._status_fixes = status_fixes or {}
         self._novel_text = novel_text
+        self._previous_chapter_plans = previous_chapter_plans or []
+        self._story_memory = story_memory
+
+    # ================================================================
+    # 记忆配置
+    # ================================================================
+
+    def _get_memory_profile(self):
+        """PlotArchitect 需要更大工作记忆来跨章节共享上下文。"""
+        from agentflow.runtime.memory.manager import MemoryProfile, WorkingConfig
+        return MemoryProfile(
+            working=WorkingConfig(max_turns=60, max_tokens=24000),
+            episodic_max=500,
+            semantic_enabled=False,
+        )
 
     # ================================================================
     # 动态前缀（Push 上下文）
@@ -256,6 +283,35 @@ class PlotArchitect(BaseAgent):
         else:
             parts.append("## 当前篇章规划\n暂无篇章路线图。请用 update_roadmap 工具创建新的 10-20 章路线图。")
 
+        # ── 前序章节规划摘要（从 StoryMemory 读取） ──
+        if self._story_memory:
+            # 故事摘要（压缩后的旧章节）
+            story_summary = getattr(self._story_memory, 'story_summary', '')
+            if story_summary:
+                parts.append("## 前情摘要\n" + story_summary[:800])
+            # 最近章节规划
+            plan_context = self._story_memory.get_plan_context()
+            if plan_context:
+                parts.append(plan_context)
+        elif self._previous_chapter_plans:
+            # Fallback: 兼容旧式列表传入
+            parts.append("## 前序章节规划回顾（已完成的规划）")
+            for pcp in self._previous_chapter_plans[-5:]:
+                ch = pcp.get("chapter_number", "?")
+                title = pcp.get("title", "?")
+                synopsis = pcp.get("synopsis", "")[:120]
+                characters = pcp.get("characters_involved", [])
+                key_events = pcp.get("key_events", [])
+                plots = pcp.get("plot_threads_introduced", [])
+                parts.append(f"- 第{ch}章「{title}」: {synopsis}")
+                if characters:
+                    parts.append(f"  涉及角色: {', '.join(characters[:8])}")
+                if key_events:
+                    parts.append(f"  关键事件: {'; '.join(key_events[:5])}")
+                if plots:
+                    parts.append(f"  引入伏笔: {'; '.join(plots[:3])}")
+            parts.append(">> 请确保本章规划与上述前序章节保持连贯，避免重复或矛盾。")
+
         # ── 原文结尾 ──
         parts.append("## 原文结尾（叙事衔接点）")
         ending = self._previous_chapter_ending
@@ -279,10 +335,10 @@ class PlotArchitect(BaseAgent):
         logger.info("PlotArchitect task: %.200s", task)
         result = await super().run(full_task)
 
-        # 记录输出
+        # 记录完整输出（Chapter Plan JSON 或 Roadmap JSON）
         from agentflow.runtime.builder import AgentResult
         output = result.output if isinstance(result, AgentResult) else str(result)
-        logger.info("PlotArchitect 输出 (前500字): %.500s", output)
+        logger.info("PlotArchitect 输出:\n%s", output)
 
         return result
 
@@ -395,227 +451,33 @@ class PlotArchitect(BaseAgent):
         return {}
 
     # ================================================================
-    # 工具（Pull —— 纯代码 KG 查询 + 角色验证）
+    # 共享工具工厂
+    # ================================================================
+
+    def _make_shared_toolkit(self):
+        """创建 SharedToolKit 实例（每次 _build_tools 调用时刷新）。"""
+        from ..tools import SharedToolKit
+        return SharedToolKit(
+            ctx=self._ctx,
+            services=self._services,
+            character_profiles=self._character_profiles,
+            character_statuses=self._character_statuses,
+            story_memory=self._story_memory,
+        )
+
+    # ================================================================
+    # 工具（Pull —— 共享工具 + Agent 专有工具）
     # ================================================================
 
     def _build_tools(self) -> list:
-        self_ref = self  # 闭包捕获引用，动态读取 _last_chapter 等字段
+        self_ref = self
         ctx = self._ctx
         kg = self._kg
-        char_profiles = self._character_profiles
-        char_statuses = self._character_statuses
 
-        @tool
-        def gather_hanging_threads() -> str:
-            """从 KG 因果链查询所有未解决伏笔。
-
-            遍历 event_relation_edges，找出 relation_type == "causes"、
-            发生在原文范围内、且有 effect 描述的事件。
-
-            Returns:
-                格式化的伏笔列表文本
-            """
-            if ctx.novel is None:
-                return "KG 不可用：小说上下文未加载"
-            graph = ctx.novel.story_graph
-            if not graph:
-                return "KG 不可用：StoryGraph 为空"
-
-            last_ch = self_ref._last_chapter
-            hanging = []
-
-            for edge in graph.event_relation_edges:
-                if edge.relation_type != "causes":
-                    continue
-                ev = graph.get_event_node(edge.from_event.split(":", 1)[-1])
-                if ev is None:
-                    continue
-                ev_end = ev.chapter_end or ev.chapter_start
-                if ev_end <= last_ch and ev.effect:
-                    hanging.append({
-                        "event": ev.name,
-                        "chapter": ev_end,
-                        "effect": ev.effect,
-                    })
-
-            if not hanging:
-                return "KG 中暂无未解决伏笔记录"
-
-            lines = [f"共 {len(hanging)} 条未解决伏笔:"]
-            for h in hanging[:15]:
-                lines.append(f"- 「{h['event']}」(第{h['chapter']}章): {h['effect'][:150]}")
-            return "\n".join(lines)
-
-        @tool
-        def gather_active_conflicts() -> str:
-            """从 KG 查询当前活跃的角色冲突。
-
-            遍历 enemy_pairs，返回冲突双方、紧张度和共享历史。
-
-            Returns:
-                格式化的冲突列表文本
-            """
-            if ctx.novel is None:
-                return "KG 不可用：小说上下文未加载"
-            graph = ctx.novel.story_graph
-            if not graph:
-                return "KG 不可用：StoryGraph 为空"
-
-            conflicts = []
-            for pair in kg.enemy_pairs(graph):
-                rel = graph.get_relationship_edge(pair[0], pair[1])
-                if rel:
-                    conflicts.append({
-                        "characters": list(pair),
-                        "tension": rel.current_tension or "?",
-                        "shared_history": rel.shared_history or "",
-                    })
-
-            if not conflicts:
-                return "KG 中暂无活跃冲突记录"
-
-            lines = [f"共 {len(conflicts)} 对活跃冲突:"]
-            for c in conflicts[:8]:
-                chars = ' vs '.join(c['characters'])
-                lines.append(f"- {chars}: 紧张度={c['tension']} | {c['shared_history'][:120]}")
-            return "\n".join(lines)
-
-        @tool
-        def lookup_character(name: str) -> str:
-            """查询角色的完整档案：状态、Voice、行为边界、关系、最后事件。
-
-            当需要写一个角色但不清楚其设定时，按需调用。
-            不要预先查询所有角色——只查本章涉及的。
-
-            Args:
-                name: 角色名
-
-            Returns:
-                格式化的角色档案文本
-            """
-            graph = ctx.novel.story_graph if ctx.novel else None
-            if not graph:
-                return f"KG 不可用，无法查询 {name}"
-
-            person = graph.get_person_node(name) if hasattr(graph, 'get_person_node') else None
-            if not person:
-                return f"KG 中未找到角色「{name}」"
-
-            lines = [
-                f"角色: {name}",
-                f"状态: {char_statuses.get(name, person.status)}",
-                f"身份: {person.role_type}",
-                f"重要性: {person.importance}",
-                f"派系: {person.faction}",
-                f"简介: {person.description or '无'}",
-            ]
-
-            # 最后参与的事件
-            if hasattr(graph, 'character_events'):
-                events = graph.character_events(name)
-                if events:
-                    last = events[-1]
-                    lines.append(
-                        f"\n最后事件（第{last.get('chapter_start','?')}章）: "
-                        f"{last.get('name','?')} — {last.get('summary','')[:120]}"
-                    )
-
-            # 关系
-            if hasattr(graph, 'relationship_edges'):
-                rels = []
-                for edge in graph.relationship_edges:
-                    if edge.from_char == name:
-                        rels.append(
-                            f"对{edge.to_char}: {edge.relation_type}"
-                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else "")
-                        )
-                    elif edge.to_char == name:
-                        rels.append(
-                            f"被{edge.from_char}: {edge.relation_type}"
-                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else "")
-                        )
-                if rels:
-                    lines.append(f"关系: {'; '.join(rels[:5])}")
-
-            # 状态硬约束
-            status = char_statuses.get(name, person.status)
-            if status in ("dead", "deceased", "killed"):
-                lines.append("\n⚠️ 此角色已死亡！只能以回忆/闪回/他人提及出现。")
-            elif status == "missing":
-                lines.append("\n⚠️ 此角色下落不明！不能直接出场。")
-
-            # 角色蒸馏档案（Voice + Boundary + Sensitivity + Anchors）
-            profile = char_profiles.get(name)
-            if profile:
-                # Voice: 语气光谱 + 句式 + 禁忌
-                if hasattr(profile, 'voice') and profile.voice:
-                    v = profile.voice
-                    if v.summary:
-                        lines.append(f"\nVoice: {v.summary}")
-                    tone_parts = []
-                    if v.tone_cold_warm:
-                        tone_parts.append(f"冷暖={v.tone_cold_warm:.1f}")
-                    if v.tone_hard_soft:
-                        tone_parts.append(f"硬软={v.tone_hard_soft:.1f}")
-                    if v.tone_distant_close:
-                        tone_parts.append(f"疏近={v.tone_distant_close:.1f}")
-                    if tone_parts:
-                        lines.append(f"语气光谱: {', '.join(tone_parts)}")
-                    if v.rhythm:
-                        lines.append(f"节奏: {v.rhythm}")
-                    if v.response_pattern:
-                        lines.append(f"回应模式: {v.response_pattern}")
-                    if v.taboo_words:
-                        lines.append(f"禁用词: {', '.join(v.taboo_words)}")
-                    if v.taboo_patterns:
-                        lines.append(f"禁用句式: {', '.join(v.taboo_patterns)}")
-                    if v.voice_shift:
-                        shifts = [f"对{k}: {vv}" for k, vv in v.voice_shift.items()]
-                        if shifts:
-                            lines.append(f"表达差异: {'; '.join(shifts[:5])}")
-
-                # Boundary: 硬底线 + 行为倾向 + 关系行为
-                if hasattr(profile, 'boundary') and profile.boundary:
-                    b = profile.boundary
-                    if b.hard_rules:
-                        lines.append(f"硬底线: {', '.join(b.hard_rules[:5])}")
-                    if b.tendencies:
-                        lines.append(f"行为倾向: {', '.join(b.tendencies[:5])}")
-                    if b.relationship_behaviors:
-                        rb = [f"对{k}: {v}" for k, v in b.relationship_behaviors.items()]
-                        if rb:
-                            lines.append(f"关系行为: {'; '.join(rb[:5])}")
-
-                # Sensitivity: 敏感触发点
-                if hasattr(profile, 'sensitivity') and profile.sensitivity:
-                    entries = profile.sensitivity.entries
-                    if entries:
-                        lines.append(f"敏感触发 ({len(entries)}项):")
-                        for e in entries[:3]:
-                            triggers = ', '.join(e.triggers[:3]) if hasattr(e, 'triggers') else ''
-                            effects = str(e.effects)[:80] if hasattr(e, 'effects') else ''
-                            if triggers:
-                                lines.append(f"  · {triggers} → {effects}")
-
-                # Policy Anchors: 情境→行动
-                if hasattr(profile, 'policy_anchors') and profile.policy_anchors:
-                    anchors = profile.policy_anchors
-                    if anchors:
-                        lines.append(f"行为锚点 ({len(anchors)}个):")
-                        for a in anchors[:3]:
-                            s = getattr(a, 'situation', '') or ''
-                            act = getattr(a, 'action', '') or ''
-                            if s and act:
-                                lines.append(f"  · {s} → {act}")
-
-                # State: 心理基线
-                if hasattr(profile, 'state') and profile.state:
-                    baseline = profile.state.baseline
-                    if baseline:
-                        base_str = ', '.join(f"{k}={v}" for k, v in list(baseline.items())[:5])
-                        lines.append(f"心理基线: {base_str}")
-
-            return "\n".join(lines)
+        # 共享工具（来自 SharedToolKit）
+        shared = self._make_shared_toolkit()
+        lookup_character = shared.make_lookup_character()
+        gather_active_conflicts = shared.make_gather_active_conflicts()
 
         @tool
         def lookup_roadmap() -> str:
@@ -805,12 +667,16 @@ class PlotArchitect(BaseAgent):
                 foreshadowing = dossier.get("foreshadowing", "")
                 fixes[name] = resolved
 
-                # 同步更新 KG PersonNode，确保 Writer 的 lookup_character 也能读到正确状态
+                # 同步更新 KG CharacterNode，后续 lookup_character 直接读到最新数据
                 graph = ctx.novel.story_graph if ctx.novel else None
                 if graph:
                     person = kg.get_person(graph, name) if hasattr(kg, 'get_person') else None
-                    if person and person.status != resolved:
-                        person._status = resolved
+                    if person:
+                        if person.status != resolved:
+                            person._status = resolved
+                        person.ending = ending or person.ending
+                        person.foreshadowing = foreshadowing or person.foreshadowing
+                        person.evidence = dossier.get("evidence", "") or person.evidence
 
                 lines = [f"{name}: {resolved}"]
                 if ending:
@@ -828,7 +694,6 @@ class PlotArchitect(BaseAgent):
             lookup_roadmap,
             update_roadmap,
             verify_character,
-            gather_hanging_threads,
             gather_active_conflicts,
             lookup_character,
         ]

@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..models import Novel
+    from ..core.models import Novel
 
 
 class ProjectService:

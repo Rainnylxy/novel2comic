@@ -1,6 +1,6 @@
 import json
 import pytest
-from src.continuation.fragment import StoryFragment, PipelineEvent, FragmentType
+from src.pipeline.fragment import StoryFragment, PipelineEvent, FragmentType
 
 
 class TestStoryFragment:

@@ -16,7 +16,7 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING
 
-from .author_style_profile import (
+from .style_profile import (
     AuthorStyleProfile,
     SyntaxProfile,
     LexiconProfile,
@@ -25,7 +25,7 @@ from .author_style_profile import (
 )
 
 if TYPE_CHECKING:
-    from ..llm import UnifiedLLM
+    from ..core.llm import UnifiedLLM
 
 
 # ============================================================

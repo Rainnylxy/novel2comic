@@ -3,7 +3,7 @@
 
 import json
 from typing import Optional
-from .models import (
+from .core.models import (
     CharacterNode, RelationshipEdge, RelationEvent,
     StoryGraph,
     EventNode, LocationNode, OrganizationNode, ItemNode,

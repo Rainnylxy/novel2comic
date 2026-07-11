@@ -17,15 +17,13 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from agentflow.runtime.toolkit import tool
-
-from ..agents.base_agent import BaseAgent
+from .base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..context import GlobalContext, ServiceRegistry
-    from ..llm import UnifiedLLM
+    from ..core.context import GlobalContext, ServiceRegistry
+    from ..core.llm import UnifiedLLM
 
 
 class ChapterWriter(BaseAgent):
@@ -46,6 +44,7 @@ class ChapterWriter(BaseAgent):
         self._chapter: dict = {}
         self._style_profile = None
         self._previous_chapter_ending: str = ""
+        self._plot_threads: list = []  # 路线图 + 前序章节引入的伏笔
         self._character_profiles: dict = {}
         self._character_statuses: dict = {}
         self._graph = None
@@ -71,21 +70,18 @@ class ChapterWriter(BaseAgent):
         character_statuses: dict = None,
         graph=None,
         previous_chapter_ending: str = "",
+        plot_threads: list = None,
     ):
         """设置 Writer 运行时上下文 —— 整章一次性注入。
 
-        chapter 结构体包含:
-          - chapter_number, title, synopsis, tone
-          - character_beats: {name: {arc, key_action, emotional_beat}}
-          - sections: [{name, goal, characters, key_beats, target_fragments}]
-
         Args:
-            chapter: 完整章节规划 dict（来自 PlotArchitect 输出）
+            chapter: 完整章节规划 dict
             style_profile: AuthorStyleProfile
-            character_profiles: 角色蒸馏 Profile（lookup_character 工具按需查询）
+            character_profiles: 角色蒸馏 Profile
             character_statuses: 角色状态映射（dead/missing/active）
-            graph: StoryGraph（Writer 用它按需查询角色信息）
+            graph: StoryGraph
             previous_chapter_ending: 上一章结尾衔接文本
+            plot_threads: 路线图 + 前序章节引入的新伏笔列表
         """
         self._chapter = chapter
         self._style_profile = style_profile
@@ -93,11 +89,90 @@ class ChapterWriter(BaseAgent):
         self._character_profiles = character_profiles or {}
         self._character_statuses = character_statuses or {}
         self._graph = graph
+        self._plot_threads = plot_threads or []
         self._lookup_cache.clear()  # 新章重置角色查询缓存
-        # System prompt 来自 skills/chapter_writer.md（AgentFlow 缓存）
-        # 动态上下文通过 _build_dynamic_prefix() 注入 task
 
-    def _build_dynamic_prefix(self) -> str:
+        # 预加载本章涉及的所有角色，注入 user prompt，避免每节重复 lookup_character
+        self._preloaded_chars_text = self._preload_characters()
+
+    def _preload_characters(self) -> str:
+        """预加载本章涉及的所有角色，返回格式化摘要供注入 user prompt。"""
+        ch = self._chapter
+        # 收集本章所有角色名
+        names = set()
+        for name in (ch.get("character_beats") or {}).keys():
+            names.add(name)
+        for section in (ch.get("sections") or []):
+            for name in (section.get("characters") or []):
+                names.add(name)
+        if not names:
+            return ""
+
+        lines = ["## 本章角色档案（已预加载，无需再 lookup_character）"]
+        for name in sorted(names):
+            # 状态
+            status = self._character_statuses.get(name, "active")
+            dead_warn = ""
+            if status in ("dead", "deceased", "killed"):
+                dead_warn = " ⚠️已死亡！只能以回忆/闪回/他人提及出现。"
+            elif status == "missing":
+                dead_warn = " ⚠️下落不明！不能直接出场。"
+
+            lines.append(f"\n### {name} ({status}){dead_warn}")
+
+            # KG 基础信息
+            graph = self._graph
+            if graph:
+                person = (graph.get_person_node(name)
+                          if hasattr(graph, 'get_person_node') else None)
+                if person:
+                    lines.append(f"身份: {person.role_type} | 派系: {person.faction}")
+                    if person.description:
+                        lines.append(f"简介: {person.description}")
+                    # Dossier
+                    if person.ending:
+                        lines.append(f"结局: {person.ending}")
+                    if person.foreshadowing:
+                        lines.append(f"伏笔: {person.foreshadowing}")
+                    # 关系
+                    if hasattr(graph, 'relationship_edges'):
+                        rels = []
+                        for edge in graph.relationship_edges:
+                            if edge.from_char == name:
+                                rels.append(f"对{edge.to_char}: {edge.relation_type}"
+                                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else ""))
+                            elif edge.to_char == name:
+                                rels.append(f"被{edge.from_char}: {edge.relation_type}"
+                                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else ""))
+                        if rels:
+                            lines.append(f"关系: {'; '.join(rels[:5])}")
+
+            # 蒸馏 Profile（Voice + Boundary + Sensitivity + Anchors）
+            profile = self._character_profiles.get(name)
+            if profile:
+                v = getattr(profile, 'voice', None)
+                if v and v.summary:
+                    lines.append(f"Voice: {v.summary}")
+                    if v.taboo_words:
+                        lines.append(f"禁用词: {', '.join(v.taboo_words)}")
+                b = getattr(profile, 'boundary', None)
+                if b and b.hard_rules:
+                    lines.append(f"硬底线: {', '.join(b.hard_rules[:5])}")
+                sens = getattr(profile, 'sensitivity', None)
+                if sens and sens.entries:
+                    for e in sens.entries[:2]:
+                        t = ', '.join(getattr(e, 'triggers', [])[:3])
+                        if t:
+                            lines.append(f"敏感触发: {t}")
+                anchors = getattr(profile, 'policy_anchors', None)
+                if anchors:
+                    for a in anchors[:2]:
+                        s = getattr(a, 'situation', '') or ''
+                        act = getattr(a, 'action', '') or ''
+                        if s and act:
+                            lines.append(f"行为锚点: {s} → {act}")
+
+        return "\n".join(lines) if len(lines) > 1 else ""
         """构建 Push 上下文（拼接到 task 前，不缓存）。
 
         只包含变化的数据：角色状态硬约束 + 风格概要。
@@ -137,19 +212,14 @@ class ChapterWriter(BaseAgent):
         self._inject_event.set()
 
     async def stream(self, section: dict, section_index: int = 0):
-        """流式生成一个小节的内容。
+        """流式生成一个小节的内容。"""
+        from ..pipeline.fragment import StoryFragment
 
-        Pipeline 逐节调用此方法。chapter 结构体已在 set_context 中注入。
-
-        Yields:
-            StoryFragment
-        """
-        from .fragment import StoryFragment
-
-        # 构建完整 task: 动态前缀（Push 上下文）+ 用户 prompt（本章+本节信息）
+        print(f"  [Writer] stream({section.get('name','?')}, idx={section_index}) 开始构建 task...",
+              flush=True)
         user_prompt = self._build_user_prompt(section, section_index)
-        prefix = self._build_dynamic_prefix()
-        task = (prefix + "\n\n" + user_prompt) if prefix else user_prompt
+        task = user_prompt
+        print(f"  [Writer] task 构建完成 ({len(task)} 字), 启动 ReAct...", flush=True)
         self._fragment_queue = asyncio.Queue()
 
         # 启动 AgentFlow ReAct 循环（异步，结果通过 queue 流出）
@@ -184,12 +254,15 @@ class ChapterWriter(BaseAgent):
 
     async def _run_and_collect(self, task: str):
         """运行 AgentFlow ReAct 循环，采集 write_section 产出的片段。"""
+        print("  [Writer] _run_and_collect: 进入 BaseAgent.run()...", flush=True)
         try:
             result = await super().run(task)
-            # 标记结束
+            print(f"  [Writer] _run_and_collect: ReAct 完成, output 长度={len(str(result))}",
+                  flush=True)
             await self._fragment_queue.put(None)
         except Exception as e:
             logger.warning("ChapterWriter run error: %s", e)
+            print(f"  [Writer] _run_and_collect 异常: {e}", flush=True)
             await self._fragment_queue.put(None)
 
     def _build_user_prompt(self, section: dict, section_index: int) -> str:
@@ -203,6 +276,10 @@ class ChapterWriter(BaseAgent):
             f"本章梗概: {ch.get('synopsis', '')}",
             f"本章基调: {ch.get('tone', '')}",
         ]
+
+        # 预加载角色档案（第一节注入，后续节共享上下文无需重复）
+        if section_index == 0 and self._preloaded_chars_text:
+            parts.append(self._preloaded_chars_text)
 
         # 角色节拍（本章各角色的情绪轨迹）
         beats = ch.get("character_beats", {})
@@ -253,209 +330,49 @@ class ChapterWriter(BaseAgent):
     # ================================================================
 
     def _build_tools(self) -> list:
-        self_ref = self  # 闭包引用，动态读取 _lookup_cache 等字段
-        ctx = self._ctx
-        kg = self._kg
-        graph = self._graph
-        char_profiles = self._character_profiles
-        char_statuses = self._character_statuses
-        style_profile = self._style_profile
-        previous_ending = self._previous_chapter_ending
-        queue = self._fragment_queue
-
-        @tool
-        def lookup_character(name: str) -> str:
-            """查询角色的当前状态、关系和关键事件。
-
-            当需要写某个角色但不清楚其最新状态时调用。
-            不会一次性加载所有角色，而是按需查询。
-
-            Args:
-                name: 角色名
-
-            Returns:
-                角色的 KG 信息摘要
-            """
-            # 同章缓存：已查过的角色直接返回，避免重复查询 KG
-            cached = self_ref._lookup_cache.get(name)
-            if cached is not None:
-                return cached
-
-            if not graph:
-                return f"KG 不可用，无法查询 {name}"
-
-            person = graph.get_person_node(name) if hasattr(graph, 'get_person_node') else None
-            if not person:
-                return f"KG 中未找到角色「{name}」"
-
-            lines = [
-                f"角色: {name}",
-                f"状态: {person.status}",
-                f"身份: {person.role_type}",
-                f"派系: {person.faction}",
-                f"简介: {person.description or '无'}",
-            ]
-
-            # 最后参与的事件
-            if hasattr(graph, 'character_events'):
-                events = graph.character_events(name)
-                if events:
-                    last = events[-1]
-                    lines.append(f"\n最后事件（第{last.get('chapter_start','?')}章）: "
-                                 f"{last.get('name','?')} — {last.get('summary','')[:120]}")
-
-            # 关系
-            if hasattr(graph, 'relationship_edges'):
-                rels = []
-                for edge in graph.relationship_edges:
-                    if edge.from_char == name:
-                        rels.append(
-                            f"对{edge.to_char}: {edge.relation_type}"
-                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else "")
-                        )
-                    elif edge.to_char == name:
-                        rels.append(
-                            f"被{edge.from_char}: {edge.relation_type}"
-                            + (f"(亲密度:{edge.intimacy:+d})" if edge.intimacy else "")
-                        )
-                if rels:
-                    lines.append(f"\n关系: {'; '.join(rels[:5])}")
-
-            # 状态硬约束提示
-            status = char_statuses.get(name, person.status)
-            if status in ("dead", "deceased", "killed"):
-                lines.append("\n⚠️ 此角色已死亡！只能以回忆/闪回/他人提及出现。")
-            elif status == "missing":
-                lines.append("\n⚠️ 此角色下落不明！不能直接出场。")
-
-            # 角色蒸馏档案（按需 Pull，不从 system prompt 推送）
-            profile = char_profiles.get(name)
-            if profile:
-                # Voice: 语气 + 句式 + 禁忌
-                if hasattr(profile, 'voice') and profile.voice:
-                    v = profile.voice
-                    if v.summary:
-                        lines.append(f"\nVoice: {v.summary}")
-                    # 语气光谱
-                    tone_parts = []
-                    if v.tone_cold_warm:
-                        tone_parts.append(f"冷暖={v.tone_cold_warm:.1f}")
-                    if v.tone_hard_soft:
-                        tone_parts.append(f"硬软={v.tone_hard_soft:.1f}")
-                    if v.tone_distant_close:
-                        tone_parts.append(f"疏近={v.tone_distant_close:.1f}")
-                    if tone_parts:
-                        lines.append(f"语气光谱: {', '.join(tone_parts)} (0=冷/硬/疏, 1=暖/软/近)")
-                    if v.rhythm:
-                        lines.append(f"说话节奏: {v.rhythm}")
-                    if v.response_pattern:
-                        lines.append(f"回应模式: {v.response_pattern}")
-                    if v.taboo_words:
-                        lines.append(f"禁用词: {', '.join(v.taboo_words)}")
-                    if v.taboo_patterns:
-                        lines.append(f"禁用句式: {', '.join(v.taboo_patterns)}")
-                    # 对不同对象的表达差异
-                    if v.voice_shift:
-                        shifts = [f"对{k}: {vv}" for k, vv in v.voice_shift.items()]
-                        if shifts:
-                            lines.append(f"表达差异: {'; '.join(shifts[:5])}")
-
-                # Boundary: 硬底线 + 行为倾向 + 关系行为
-                if hasattr(profile, 'boundary') and profile.boundary:
-                    b = profile.boundary
-                    if b.hard_rules:
-                        lines.append(f"硬底线: {', '.join(b.hard_rules[:5])}")
-                    if b.tendencies:
-                        lines.append(f"行为倾向: {', '.join(b.tendencies[:5])}")
-                    if b.relationship_behaviors:
-                        rb = [f"对{k}: {v}" for k, v in b.relationship_behaviors.items()]
-                        if rb:
-                            lines.append(f"关系行为: {'; '.join(rb[:5])}")
-
-                # Sensitivity: 敏感触发点
-                if hasattr(profile, 'sensitivity') and profile.sensitivity:
-                    entries = profile.sensitivity.entries
-                    if entries:
-                        lines.append(f"敏感触发 ({len(entries)}项):")
-                        for e in entries[:3]:
-                            triggers = ', '.join(e.triggers[:3]) if hasattr(e, 'triggers') else ''
-                            effects = str(e.effects)[:80] if hasattr(e, 'effects') else ''
-                            if triggers:
-                                lines.append(f"  · {triggers} → {effects}")
-
-                # Policy Anchors: 典型行为模式
-                if hasattr(profile, 'policy_anchors') and profile.policy_anchors:
-                    anchors = profile.policy_anchors
-                    if anchors:
-                        lines.append(f"行为锚点 ({len(anchors)}个):")
-                        for a in anchors[:3]:
-                            situation = getattr(a, 'situation', '') or ''
-                            action = getattr(a, 'action', '') or ''
-                            if situation and action:
-                                lines.append(f"  · {situation} → {action}")
-
-                # State: 心理基线
-                if hasattr(profile, 'state') and profile.state:
-                    baseline = profile.state.baseline
-                    if baseline:
-                        base_str = ', '.join(f"{k}={v}" for k, v in list(baseline.items())[:5])
-                        lines.append(f"心理基线: {base_str}")
-
-            result = "\n".join(lines)
-            self_ref._lookup_cache[name] = result  # 缓存，同章内复用
-            return result
-
-        @tool
-        def recall_foreshadowing() -> str:
-            """查询 KG 中所有未解决的伏笔和因果链。
-
-            当需要推进情节但不确定有哪些未完成线索时调用。
-
-            Returns:
-                未解决伏笔列表
-            """
-            if not graph:
-                return "KG 不可用"
-
-            # 因果链
-            hanging = []
-            for edge in graph.event_relation_edges:
-                if edge.relation_type == "causes":
-                    ev = graph.get_event_node(
-                        edge.from_event.split(":", 1)[-1]
-                    ) if hasattr(graph, 'get_event_node') else None
-                    if ev and ev.effect:
-                        hanging.append(
-                            f"「{ev.name}」(第{ev.chapter_start}章): {ev.effect[:100]}"
-                        )
-
-            if not hanging:
-                return "KG 中暂无未解决伏笔记录"
-
-            return "未解决伏笔:\n" + "\n".join(
-                f"- {h}" for h in hanging[:10]
-            )
+        # 共享工具（来自 SharedToolKit，启用同章缓存）
+        shared = self._make_shared_toolkit()
+        lookup_character = shared.make_lookup_character()
+        recall_foreshadowing = shared.make_recall_foreshadowing()
 
         return [
             lookup_character,
             recall_foreshadowing,
         ]
 
+    def _make_shared_toolkit(self):
+        """创建 SharedToolKit 实例（每次 set_context 后缓存刷新）。"""
+        from ..tools import SharedToolKit
+        return SharedToolKit(
+            ctx=self._ctx,
+            services=self._services,
+            character_profiles=self._character_profiles,
+            character_statuses=self._character_statuses,
+            plot_threads=self._plot_threads,
+            story_memory=getattr(self, '_story_memory', None),
+            enable_cache=True,  # 同章内重复查询走缓存
+        )
+
     # ================================================================
     # Post-turn: 从 LLM 自然终止输出中提取 StoryFragment
     # ================================================================
 
-    def _on_post_turn(self, user_msg: str, assistant_msg):
-        """从 AgentFlow 自然终止输出中解析 StoryFragment。
+    # LLM 自定义 schema → StoryFragment 字段映射
+    _TYPE_MAP = {
+        "narration": "narration", "叙事": "narration", "旁白": "narration",
+        "dialogue": "dialogue", "对话": "dialogue",
+        "action": "action", "动作": "action", "推进": "action", "过渡": "action",
+        "inner_thought": "inner_thought", "内心独白": "inner_thought",
+        "divider": "divider", "分隔": "divider",
+    }
 
-        assistant_msg 可能是 str 或 AgentFlow 的 AgentResult 对象。
-        """
-        from .fragment import StoryFragment
+    def _on_post_turn(self, user_msg: str, assistant_msg):
+        """从 AgentFlow 自然终止输出中解析 StoryFragment。"""
+        from ..pipeline.fragment import StoryFragment
 
         if not assistant_msg:
             return
 
-        # AgentFlow 的 AgentResult 用 .output，工具返回值可能是 str
         from agentflow.runtime.builder import AgentResult
         if isinstance(assistant_msg, AgentResult):
             text = assistant_msg.output
@@ -467,14 +384,64 @@ class ChapterWriter(BaseAgent):
         if not text or not text.strip():
             return
 
-        # 尝试按行解析 JSON fragment
-        for line in text.strip().split("\n"):
-            line = line.strip()
-            if not line or not line.startswith("{"):
+        # 1. 从 ```json 代码块中提取多行 JSON
+        import re
+        json_blocks = re.findall(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+        if not json_blocks:
+            # 尝试提取裸 JSON 对象
+            json_blocks = re.findall(r'\{[^{}]*"type"\s*:\s*"[^"]+"[^{}]*\}', text, re.DOTALL)
+
+        parsed = 0
+        for block in json_blocks:
+            block = block.strip()
+            if not block.startswith("{"):
                 continue
-            fragment = StoryFragment.parse_stream_line(line)
-            if fragment:
+            try:
+                obj = json.loads(block)
+            except json.JSONDecodeError:
+                continue
+
+            # 映射到 StoryFragment
+            raw_type = obj.get("type", "narration")
+            frag_type = self._TYPE_MAP.get(raw_type, "narration")
+            frag_text = obj.get("text") or obj.get("content") or ""
+            character = obj.get("character") or obj.get("speaker") or None
+            divider_label = obj.get("divider_label") or None
+
+            if frag_text.strip():
+                fragment = StoryFragment(
+                    type=frag_type, text=frag_text.strip(),
+                    character=character, divider_label=divider_label,
+                )
                 try:
                     self._fragment_queue.put_nowait(fragment)
+                    parsed += 1
                 except asyncio.QueueFull:
                     pass
+
+        # 2. 如果没有 JSON，尝试单行 JSON
+        if parsed == 0:
+            for line in text.strip().split("\n"):
+                line = line.strip()
+                if not line or not line.startswith("{"):
+                    continue
+                fragment = StoryFragment.parse_stream_line(line)
+                if fragment:
+                    try:
+                        self._fragment_queue.put_nowait(fragment)
+                        parsed += 1
+                    except asyncio.QueueFull:
+                        pass
+
+        # 3. 兜底：纯文本按段落拆分为 narration
+        if parsed == 0:
+            clean = text.strip()
+            if clean:
+                for para in clean.split("\n\n"):
+                    para = para.strip()
+                    if para:
+                        fragment = StoryFragment(type="narration", text=para)
+                        try:
+                            self._fragment_queue.put_nowait(fragment)
+                        except asyncio.QueueFull:
+                            pass

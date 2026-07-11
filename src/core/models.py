@@ -23,13 +23,18 @@ class CharacterNode:
     first_appearance_chapter: int = 0
     status: str = "active"                    # "active" | "dead" | "missing" | "unknown"
     description: str = ""                     # 一句话描述
+    ending: str = ""                          # verify_character 产出：结局/退场方式
+    foreshadowing: str = ""                   # verify_character 产出：未解决伏笔
+    evidence: str = ""                        # verify_character 产出：原文依据
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "CharacterNode":
-        return cls(**d)
+        valid = {k: v for k, v in d.items()
+                 if k in cls.__dataclass_fields__}
+        return cls(**valid)
 
 
 @dataclass

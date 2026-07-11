@@ -14,8 +14,8 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ..context import GlobalContext, ServiceRegistry
-from ..llm import UnifiedLLM
+from ..core.context import AppContext, ServiceRegistry
+from ..core.llm import UnifiedLLM
 from ..services import (
     KnowledgeGraphService,
     ProjectService,
@@ -31,7 +31,10 @@ def _build_context_and_services(
     api_key: str, base_url: str, model: str, proxy: str,
     tool_model: str = "",
 ) -> tuple:
-    """构建 GlobalContext 和 ServiceRegistry。"""
+    """构建 AppContext 和 ServiceRegistry。
+
+    LLM 统一放入 ServiceRegistry，ctx 只持有 novel + services。
+    """
     import openai
     import httpx
     from agentflow.runtime.llm_client import OpenAIClient
@@ -49,12 +52,6 @@ def _build_context_and_services(
 
     llm = UnifiedLLM(sync_openai, tool_model or model)
 
-    ctx = GlobalContext(
-        llm_model=model,
-        agent_llm=agent_llm,
-        sync_openai=sync_openai,
-    )
-
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     projects_dir = os.path.join(root_dir, "projects")
 
@@ -64,12 +61,15 @@ def _build_context_and_services(
     services = ServiceRegistry(
         kg=kg_svc,
         project=project_svc,
+        llm=llm,
+        agent_llm=agent_llm,
     )
-    ctx.services = services
+
+    ctx = AppContext(services=services)
     return ctx, services, llm
 
 
-def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext,
+def _load_novel(novel_path: str, services: ServiceRegistry, ctx: AppContext,
                 force_rebuild: bool = False):
     """加载小说 + 逐章提取 KG。
 
@@ -77,7 +77,7 @@ def _load_novel(novel_path: str, services: ServiceRegistry, ctx: GlobalContext,
     force_rebuild=True 强制重新提取。
     """
     from ..chapter_parser import parse_novel_chapters
-    from ..models import Novel
+    from ..core.models import Novel
 
     print(f"[Loading] 正在加载 {novel_path}...")
     text = PS.read_text_file(novel_path)
@@ -124,7 +124,7 @@ def _find_cached_novel(services: ServiceRegistry, base_name: str,
     匹配条件: 目录名以 base_name 开头 + novel.json 存在 + 章节数匹配。
     返回 Novel 对象或 None。
     """
-    from ..models import Novel
+    from ..core.models import Novel
 
     projects_dir = services.project._projects_dir
     if not projects_dir or not os.path.isdir(projects_dir):
@@ -185,7 +185,7 @@ async def run_write(args):
         api_key, base_url, model, proxy, tool_model,
     )
 
-    from ..continuation.pipeline import ContinuationPipeline
+    from ..pipeline.pipeline import ContinuationPipeline
 
     pipeline = ContinuationPipeline(ctx, services, llm)
     pipeline.load_novel(args.novel)
@@ -219,10 +219,17 @@ async def run_write(args):
             elif event.event_type == "review":
                 issues = event.data.get("issues", [])
                 score = event.data.get("overall_score", "?")
-                print(f"\n  审校完成: {len(issues)} 个问题 | 评分: {score}")
+                print(f"\n  审校: {len(issues)} 个问题 | 评分: {score}")
             elif event.event_type == "complete":
+                ch_num = event.data.get("chapter", "?")
+                ch_title = event.data.get("title", "")
+                chapter_count = event.data.get("chapter_count", 1)
+                print(f"\n  ✅ 第{ch_num}章「{ch_title}」完成 ({chapter_count}/{chapter_count})")
+            elif event.event_type == "done":
+                written = event.data.get("chapters_written", 0)
+                reason = event.data.get("reason", "")
                 print(f"\n{'='*50}")
-                print(f"  ✅ 续写完成")
+                print(f"  ✅ 续写结束: {written} 章 ({reason})")
                 print(f"{'='*50}")
             elif event.event_type == "error":
                 print(f"\n❌ 错误: {event.data.get('message', '')}")

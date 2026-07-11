@@ -13,15 +13,15 @@ from ..knowledge_graph import (
     update_story_graph_with_chapter,
     graph_to_context,
 )
-from ..models import StoryGraph
+from ..core.models import StoryGraph
 
 if TYPE_CHECKING:
-    from ..models import (
+    from ..core.models import (
         Novel, CharacterNode, EventNode,
         LocationNode, OrganizationNode, ItemNode,
         RelationshipEdge, ChapterInfo,
     )
-    from ..llm import UnifiedLLM
+    from ..core.llm import UnifiedLLM
 
 
 class KnowledgeGraphService:

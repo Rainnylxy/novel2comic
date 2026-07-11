@@ -16,13 +16,14 @@ import re
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
 from .fragment import PipelineEvent, StoryFragment
-from .plot_architect import PlotArchitect, make_fallback_chapter, make_fallback_roadmap
-from .chapter_writer import ChapterWriter
-from .revision_editor import ReviewEditor
+from ..agents.plot_architect import PlotArchitect, make_fallback_chapter, make_fallback_roadmap
+from ..agents.chapter_writer import ChapterWriter
+from ..agents.review_editor import ReviewEditor
+from .story_memory import StoryMemory
 
 if TYPE_CHECKING:
-    from ..context import GlobalContext, ServiceRegistry
-    from ..llm import UnifiedLLM
+    from ..core.context import GlobalContext, ServiceRegistry
+    from ..core.llm import UnifiedLLM
 
 
 class ContinuationPipeline:
@@ -69,6 +70,13 @@ class ContinuationPipeline:
         self._style_profile = None
         self._character_profiles: dict = {}
         self._previous_chapter_ending: str = ""
+        self._novel_text: str = ""  # load_novel 时缓存
+        self._introduced_threads: list = []  # 路线图 + 各章引入的伏笔
+        self._chapter_plan_history: list = []  # 前序章节规划摘要（兼容旧引用）
+        self._stop_requested: bool = False  # inject("stop") 或前端关闭 SSE 触发
+
+        # 应用层记忆：故事状态的单一事实源
+        self._story_memory = StoryMemory()
 
     @property
     def phase(self) -> str:
@@ -96,13 +104,14 @@ class ContinuationPipeline:
             novel_path: 小说文件路径（如 novels/poyun.txt）
         """
         from ..chapter_parser import parse_novel_chapters
-        from ..models import Novel
+        from ..core.models import Novel
         from ..services.project_service import ProjectService as PS
-        from ..character_distiller import CharacterDistiller
-        from .author_style_distiller import AuthorStyleDistiller
+        from ..distillers.character_distiller import CharacterDistiller
+        from ..distillers.style_distiller import AuthorStyleDistiller
 
         # 1. 加载文本 & 解析章节
         text = PS.read_text_file(novel_path)
+        self._novel_text = text  # 缓存全文，verify_character 需要
         base_name = novel_path.replace("\\", "/").split("/")[-1].rsplit(".", 1)[0]
         chapters = parse_novel_chapters(text, base_name)
         self._chapter = len(chapters)
@@ -200,6 +209,34 @@ class ContinuationPipeline:
         elif not cached_profiles:
             print(f"[Char] 无角色需要蒸馏")
 
+        # 4.5 初始化 StoryMemory（从 KG + 验证缓存构建角色状态）
+        persons = self._kg.get_all_persons(graph)
+        for p in persons:
+            status = self._status_fixes.get(p.name, p.status or "active")
+            self._story_memory.update_character(
+                p.name,
+                status=status,
+                verified=p.name in self._status_verified,
+                role_type=p.role_type or "",
+                importance=p.importance or 0,
+                faction=p.faction or "",
+                ending=getattr(p, 'ending', '') or '',
+                foreshadowing=getattr(p, 'foreshadowing', '') or '',
+            )
+        if hasattr(graph, 'enemy_pairs'):
+            conflicts = []
+            for pair in self._kg.enemy_pairs(graph):
+                rel = graph.get_relationship_edge(pair[0], pair[1])
+                if rel:
+                    conflicts.append({
+                        "characters": list(pair),
+                        "tension": rel.current_tension or "?",
+                        "description": (rel.shared_history or "")[:120],
+                    })
+            self._story_memory.update_conflicts(conflicts)
+        print(f"[StoryMemory] 初始化: {len(self._story_memory.character_states)} 个角色, "
+              f"{len(self._story_memory.active_conflicts)} 对冲突")
+
         # 5. 提取最后一章结尾
         if chapters:
             last_ch = chapters[-1]
@@ -208,25 +245,21 @@ class ContinuationPipeline:
                   f"结尾上下文: {len(self._previous_chapter_ending)} 字")
 
         # 6. 初始化 Agent
-        print(f"[Agents] 初始化 4 个 Agent...", end=" ", flush=True)
+        print(f"[Agents] 初始化 3 个 Agent...", end=" ", flush=True)
         self._init_agents()
         print("完成")
 
     def _get_character_statuses(self) -> dict:
-        """获取角色状态映射（KG baseline + 已验证角色的覆盖值）。
+        """获取角色状态映射（从 StoryMemory 读取）。
 
-        不做主动验证——验证由 _verify_characters_in_text() 按需触发。
+        不做主动验证——验证由 Architect 的 verify_character 工具按需触发。
         只返回 non-active 状态（active 是默认，不需要约束提示）。
 
         Returns:
             {name: status}
         """
-        graph = self._ctx.novel.story_graph if self._ctx.novel else None
-        if not graph:
-            return {}
-        persons = self._kg.get_all_persons(graph)
-        return {p.name: p.status for p in persons
-                if p.status and p.status != "active"}
+        return {n: s for n, s in self._story_memory.get_character_statuses().items()
+                if s != "active"}
 
     def _verify_characters_in_text(self, text: str):
         """按需验证：提取文本中提到的角色，对其做现场状态验证。
@@ -306,6 +339,9 @@ class ContinuationPipeline:
                     print(f"确认 {resolved}" + (f" — {ending[:40]}" if ending else ""))
                 person._status = resolved  # 修正 KG PersonNode
                 self._status_fixes[name] = resolved
+                # 同步到 StoryMemory
+                self._story_memory.update_character(name, status=resolved, verified=True,
+                                                    ending=ending, foreshadowing=foreshadowing)
             else:
                 print("无法确定（LLM 返回空）")
 
@@ -395,7 +431,9 @@ class ContinuationPipeline:
         return {}
 
     def _get_novel_text(self) -> str:
-        """获取小说全文文本。"""
+        """获取小说全文文本。优先用 load_novel 时缓存的 _novel_text。"""
+        if self._novel_text:
+            return self._novel_text
         if self._ctx.novel and self._ctx.novel.file_path:
             try:
                 from ..services.project_service import ProjectService as PS
@@ -506,11 +544,16 @@ class ContinuationPipeline:
         self.writer = ChapterWriter(self._ctx, self._services, self._llm)
         self.review_editor = ReviewEditor(self._ctx, self._services, self._llm)
 
-    async def run(self, instruction: str = "") -> AsyncGenerator[PipelineEvent, None]:
+    async def run(self, instruction: str = "",
+                  auto_loop: bool = True) -> AsyncGenerator[PipelineEvent, None]:
         """运行续写流水线。
 
+        使用 while 循环自动推进多章：Planning → Writing → Review → 下一章。
+        Architect 的 AgentFlow 会话在循环中持久——working memory 跨章累积。
+
         Args:
-            instruction: 用户初始指令（可选）
+            instruction: 用户初始指令（仅首章有效）
+            auto_loop: True=自动循环直到路线图耗尽, False=只写一章（CLI 调试用）
 
         Yields:
             PipelineEvent: 每个事件通过 SSE 推送
@@ -518,24 +561,33 @@ class ContinuationPipeline:
         if not self.architect or not self.writer or not self.review_editor:
             raise RuntimeError("请先调用 load_novel() 加载小说")
 
-        need_plan = not self._pending_arc or self._arc_chapter_index >= len(
-            self._pending_arc.get("chapters", []))
+        max_chapters = int(os.getenv("MAX_CHAPTERS", "50"))
+        self._stop_requested = False
+        self._fragment_count = 0
+        chapter_count = 0
+        active_instruction = instruction
 
-        # —— 阶段 1: Agent 自主规划 ——
-        if need_plan:
-            self._phase = "planning"
+        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
+
+        # ── 主循环：每迭代一章 ──
+        while not self._stop_requested and chapter_count < max_chapters:
+            chapter_count += 1
             ch_num = self._chapter + 1
-            print(f"\n{'─'*40}\n[Phase 1/4] 剧情规划 — Plot Architect 自主规划第{ch_num}章...")
+
+            # ================================================
+            # Phase 1: Planning（Architect AgentFlow 会话持久）
+            # ================================================
+            self._phase = "planning"
+            print(f"\n{'─'*40}\n[第{chapter_count}章] Phase 1/3 — Plot Architect 规划第{ch_num}章...")
             yield PipelineEvent("phase", {"phase": "planning"})
 
-            # 创建可变 roadmap_store，Agent 通过工具自主读写
-            project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
+            # 构建 roadmap_store（可变，Agent 工具直接读写）
             roadmap_store = {
                 "data": self._roadmap,
                 "chapter_index": self._roadmap_chapter_index,
                 "next_chapter": ch_num,
                 "dirty": False,
-                "project_dir": project_dir,  # 工具内部可直接落盘
+                "project_dir": project_dir,
             }
 
             self.architect.set_context(
@@ -543,153 +595,210 @@ class ContinuationPipeline:
                 style_profile=self._style_profile,
                 character_profiles=self._character_profiles,
                 last_chapter=self._chapter,
-                user_instruction=instruction,
+                user_instruction=active_instruction,
                 character_statuses=self._get_character_statuses(),
                 roadmap_store=roadmap_store,
-                # 角色验证状态（共享可变引用，Agent 通过 verify_character 工具读写）
                 status_verified=self._status_verified,
                 status_fixes=self._status_fixes,
                 novel_text=self._get_novel_text(),
+                previous_chapter_plans=self._chapter_plan_history,
+                story_memory=self._story_memory,
             )
 
-            # 一次调用，Agent 内部自己决定：
-            #   查路线图 → 用完了就更新 → verify_character(角色) → 查伏笔 → 产出章节规划
             chapter_raw = await self.architect.run(
-                f"请根据当前进度，完成第{ch_num}章的详细规划。"
-                f"如果路线图已用尽或不存在，请先更新路线图。"
-                f"使用角色前，请用 verify_character 工具确认其当前状态。"
+                f"请完成第{ch_num}章的详细规划。你的 skill 和工具已经就绪，直接开始规划。"
             )
 
-            # 如果 Agent 修改了路线图，持久化
+            # 同步路线图（Agent 可能通过 update_roadmap 工具修改了它）
             if roadmap_store.get("dirty"):
                 self._roadmap = roadmap_store["data"]
                 self._roadmap_chapter_index = roadmap_store.get("chapter_index", 0)
-                project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
                 if project_dir:
                     self._save_roadmap(project_dir, self._roadmap)
                     self._save_roadmap_index(project_dir, self._roadmap_chapter_index)
                 ms_count = len(self._roadmap.get("milestones", []))
-                print(f"  [Roadmap] Agent 更新了路线图: {self._roadmap.get('roadmap_title', '?')} — {ms_count} 个里程碑")
+                print(f"  [Roadmap] 路线图更新: {self._roadmap.get('roadmap_title', '?')} — {ms_count} 个里程碑")
 
             # 解析章节规划
             chapter = self._parse_chapter_plan(chapter_raw)
+            ch_title = chapter.get("title", "")
 
-            # 持久化章节规划到磁盘，便于审查
+            # 检查是否是大结局标记
+            if chapter.get("is_final"):
+                print(f"  [Architect] 标记为大结局，写完本章后结束")
+                self._stop_requested = True
+
+            # 累积规划历史（StoryMemory 统一管理）
+            plan_summary = {
+                "chapter_number": chapter.get("chapter_number", ch_num),
+                "title": ch_title,
+                "synopsis": chapter.get("synopsis", ""),
+                "characters_involved": list(chapter.get("character_beats", {}).keys()) if isinstance(chapter.get("character_beats"), dict) else [],
+                "key_events": [s.get("goal", "") for s in chapter.get("sections", [])],
+                "plot_threads_introduced": chapter.get("plot_threads_introduced", []),
+            }
+            self._story_memory.add_chapter_plan(plan_summary)
+            self._chapter_plan_history = self._story_memory.chapter_plans  # 兼容旧引用
+
+            # 收集伏笔（StoryMemory 去重管理）
+            if roadmap_store.get("dirty"):
+                for t in self._roadmap.get("plot_threads_introduced", []):
+                    self._story_memory.add_thread(t, ch_num)
+            for t in chapter.get("plot_threads_introduced", []):
+                self._story_memory.add_thread(t, ch_num)
+            self._introduced_threads = self._story_memory.get_pending_threads()
+
+            # 持久化
             if project_dir:
                 self._save_chapter_plan(project_dir, ch_num, chapter)
 
-            # 包装为兼容现有写作循环的格式
             self._pending_arc = {"chapters": [chapter]}
             self._arc_chapter_index = 0
             yield PipelineEvent("outline", self._pending_arc)
 
-        # —— 阶段 2: 写作（只写下一章） ——
-        self._phase = "writing"
-        chapters = self._pending_arc.get("chapters", [])
-        chapter = chapters[self._arc_chapter_index]
-        ch_num = chapter.get("chapter_number", self._chapter + 1)
-        ch_title = chapter.get("title", "")
-        sections = chapter.get("sections", [])
-        if not sections:
-            sections = [{"name": "main", "goal": chapter.get("synopsis", ""),
-                         "characters": [], "key_beats": [], "target_fragments": 20}]
+            # ================================================
+            # Phase 2: Writing
+            # ================================================
+            self._phase = "writing"
+            sections = chapter.get("sections", [])
+            if not sections:
+                sections = [{"name": "main", "goal": chapter.get("synopsis", ""),
+                             "characters": [], "key_beats": [], "target_fragments": 20}]
 
-        total_ch = len(chapters)
-        print(f"[Phase 2/4] 第{ch_num}章「{ch_title}」(弧线 {self._arc_chapter_index + 1}/{total_ch}) — {len(sections)} 节")
-        yield PipelineEvent("phase", {"phase": "writing"})
-        yield PipelineEvent("fragment", {
-            "type": "divider", "text": "",
-            "divider_label": f"第{ch_num}章「{ch_title}」"
-        })
+            print(f"[第{chapter_count}章] Phase 2/3 — 写作「{ch_title}」{len(sections)} 节")
+            yield PipelineEvent("phase", {"phase": "writing"})
+            yield PipelineEvent("fragment", {
+                "type": "divider", "text": "",
+                "divider_label": f"第{ch_num}章「{ch_title}」"
+            })
 
-        # 注入整章结构体（一次性，不在每节重复）
-        self.writer.set_context(
-            chapter=chapter,
-            style_profile=self._style_profile,
-            character_profiles=self._character_profiles,
-            character_statuses=self._get_character_statuses(),
-            graph=self._ctx.novel.story_graph if self._ctx.novel else None,
-            previous_chapter_ending=self._previous_chapter_ending
-                if self._arc_chapter_index == 0 else "",
-        )
+            self.writer.set_context(
+                chapter=chapter,
+                style_profile=self._style_profile,
+                character_profiles=self._character_profiles,
+                character_statuses=self._get_character_statuses(),
+                graph=self._ctx.novel.story_graph if self._ctx.novel else None,
+                previous_chapter_ending=self._previous_chapter_ending,
+                plot_threads=self._introduced_threads,
+            )
 
-        draft_fragments = []
-        for i, section in enumerate(sections):
-            section_name = section.get("name", f"section_{i}")
-            print(f"  [{i+1}/{len(sections)}] {section_name}: "
-                  f"{section.get('goal', '')[:50]}")
+            draft_fragments = []
+            for i, section in enumerate(sections):
+                section_name = section.get("name", f"section_{i}")
+                print(f"  [{i+1}/{len(sections)}] {section_name}: "
+                      f"{section.get('goal', '')[:50]}")
 
-            section_text = json.dumps(section, ensure_ascii=False)
-            # self._verify_characters_in_text(section_text)
+                async for fragment in self.writer.stream(section, section_index=i):
+                    draft_fragments.append(fragment)
+                    self._fragment_count += 1
+                    yield PipelineEvent("fragment", fragment.to_dict())
 
-            async for fragment in self.writer.stream(section, section_index=i):
-                draft_fragments.append(fragment)
-                self._fragment_count += 1
-                yield PipelineEvent("fragment", fragment.to_dict())
+                if draft_fragments:
+                    recent = draft_fragments[-3:]
+                    self._previous_chapter_ending = "\n".join(
+                        f"[{f.type}] {f.character + ': ' if f.character else ''}{f.text}"
+                        for f in recent
+                    )
 
-            if draft_fragments:
-                recent = draft_fragments[-3:]
-                self._previous_chapter_ending = "\n".join(
-                    f"[{f.type}] {f.character + ': ' if f.character else ''}{f.text}"
-                    for f in recent
-                )
+            # 推进状态
+            self._arc_chapter_index += 1
+            self._chapter = ch_num
+            self._roadmap_chapter_index += 1
+            if project_dir:
+                self._save_roadmap_index(project_dir, self._roadmap_chapter_index)
 
-        # 推进到下一章
-        self._arc_chapter_index += 1
-        self._chapter = ch_num
+            # ================================================
+            # Phase 3: Review
+            # ================================================
+            self._phase = "reviewing"
+            print(f"[第{chapter_count}章] Phase 3/3 — 审校修订...")
+            yield PipelineEvent("phase", {"phase": "reviewing"})
 
-        # 推进路线图里程碑
-        self._roadmap_chapter_index += 1
-        project_dir = self._ctx.novel.output_dir if self._ctx.novel else ""
-        if project_dir:
-            self._save_roadmap_index(project_dir, self._roadmap_chapter_index)
+            self.review_editor.set_context(
+                draft_fragments=draft_fragments,
+                character_profiles=self._character_profiles,
+                style_profile=self._style_profile,
+            )
+            result_raw = await self.review_editor.run("审校并修订草稿")
+            result = self._parse_review_result(result_raw)
 
-        # —— 阶段 3: 审校 + 修订（合并为一次调用） ——
-        self._phase = "reviewing"
-        print(f"[Phase 3/3] 审校修订 — Review Editor 检查草稿并修正问题...")
-        yield PipelineEvent("phase", {"phase": "reviewing"})
+            changes = result.get("changes", [])
+            score = result.get("overall_score", "?")
+            revised = result.get("revised_fragments",
+                                 [f.to_dict() for f in draft_fragments])
 
-        self.review_editor.set_context(
-            draft_fragments=draft_fragments,
-            character_profiles=self._character_profiles,
-            style_profile=self._style_profile,
-        )
-        result_raw = await self.review_editor.run("审校并修订草稿")
-        result = self._parse_review_result(result_raw)
+            if changes:
+                print(f"  审校: {len(changes)} 处修改 (评分: {score})")
+            else:
+                print(f"  审校: 通过 (评分: {score})")
 
-        changes = result.get("changes", [])
-        score = result.get("overall_score", "?")
-        revised = result.get("revised_fragments",
-                             [f.to_dict() for f in draft_fragments])
+            yield PipelineEvent("review", {
+                "issues": [{"type": c.get("reason", ""), "severity": "fixed",
+                            "description": c.get("original", "")[:80],
+                            "suggestion": c.get("revised", "")[:80]}
+                           for c in changes],
+                "overall_score": score,
+            })
+            yield PipelineEvent("complete", {
+                "chapter": ch_num,
+                "title": ch_title,
+                "revised_fragments": revised,
+                "changes": changes,
+                "chapter_count": chapter_count,
+                "total_fragments": self._fragment_count,
+            })
 
-        if changes:
-            print(f"  审校修订完成: {len(changes)} 处修改 (评分: {score})")
-        else:
-            print(f"  审校通过，无需修改 (评分: {score})")
+            # 首次指令只用一次
+            active_instruction = ""
 
-        yield PipelineEvent("review", {
-            "issues": [{"type": c.get("reason", ""), "severity": "fixed",
-                        "description": c.get("original", "")[:80],
-                        "suggestion": c.get("revised", "")[:80]}
-                       for c in changes],
-            "overall_score": score,
-        })
-        yield PipelineEvent("complete", {
-            "revised_fragments": revised,
-            "changes": changes,
-        })
+            # ── 应用层记忆更新 ──
+            self._story_memory.post_chapter(chapter, draft_fragments, ch_num)
 
-        # 完成
+            # ── 章节压缩检查 ──
+            if len(self._story_memory.chapter_plans) > 10:
+                await self._story_memory.compact(self._llm)
+
+            # 检查是否应该继续循环
+            if not auto_loop:
+                break
+
+            has_roadmap = bool(self._roadmap.get("milestones"))
+            if not has_roadmap:
+                # 无路线图 → Architect 没有创建路线图，停止
+                print(f"  [Loop] 无篇章路线图，续写结束")
+                break
+
+            milestones = self._roadmap.get("milestones", [])
+            if self._roadmap_chapter_index >= len(milestones):
+                print(f"  [Loop] 路线图 {len(milestones)} 个里程碑全部完成")
+                if self._roadmap.get("is_final_roadmap"):
+                    print(f"  [Loop] 最终路线图完成，续写结束")
+                    break
+                # Architect 下次规划会创建新路线图
+                print(f"  [Loop] 下轮将触发新路线图规划")
+
+        # ── 结束 ──
         self._phase = "idle"
-        print(f"{'─'*40}\n[完成] 续写流水线结束 — {self._fragment_count} 个片段")
-        yield PipelineEvent("done", {})
+        reason = "stop_requested" if self._stop_requested else \
+                 "max_chapters" if chapter_count >= max_chapters else \
+                 "roadmap_exhausted"
+        print(f"{'─'*40}\n[完成] {chapter_count} 章, {self._fragment_count} 个片段 ({reason})")
+        yield PipelineEvent("done", {"chapters_written": chapter_count, "reason": reason})
 
     async def inject(self, instruction: str):
         """接收用户注入指令，转发到 Chapter Writer。
 
+        特殊指令:
+          - "stop" / "停止": 在当前章节完成后停止循环
+
         Args:
             instruction: 用户自然语言指令
         """
+        if instruction.strip().lower() in ("stop", "停止", "结束"):
+            self._stop_requested = True
+            print(f"  [Inject] 收到停止指令，当前章节完成后将结束循环")
+            return
+
         # 按需验证：用户指令中可能提到新角色
         self._verify_characters_in_text(instruction)
         if self.writer:
@@ -857,7 +966,7 @@ class ContinuationPipeline:
         Returns:
             Novel 对象或 None
         """
-        from ..models import Novel
+        from ..core.models import Novel
         projects_dir = getattr(self._services.project, '_projects_dir', '')
         if not projects_dir or not os.path.isdir(projects_dir):
             return None
@@ -889,7 +998,7 @@ class ContinuationPipeline:
     def _load_cached_style(self, project_dir: str) -> Optional[object]:
         """从项目目录加载缓存的文风 Profile。"""
         import os
-        from .author_style_profile import AuthorStyleProfile
+        from ..distillers.style_profile import AuthorStyleProfile
         cache_path = os.path.join(project_dir, "author_style_profile.json")
         if os.path.exists(cache_path):
             try:
@@ -914,7 +1023,7 @@ class ContinuationPipeline:
         Returns:
             {name: CharacterProfile} 或 None（缓存不存在或读取失败）
         """
-        from ..character_profile_models import CharacterProfile
+        from ..distillers.character_profile import CharacterProfile
         cache_path = os.path.join(project_dir, "character_profiles.json")
         if not os.path.exists(cache_path):
             return None

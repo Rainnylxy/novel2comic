@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.continuation.fragment import StoryFragment, PipelineEvent
-from src.continuation.pipeline import ContinuationPipeline
-from src.context import GlobalContext, ServiceRegistry
+from src.pipeline.fragment import StoryFragment, PipelineEvent
+from src.pipeline.pipeline import ContinuationPipeline
+from src.core.context import GlobalContext, ServiceRegistry
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ class TestPipelineFlow:
         pipeline.review_editor = mock_review_editor
 
         events = []
-        async for event in pipeline.run("test instruction"):
+        async for event in pipeline.run("test instruction", auto_loop=False):
             events.append(event)
 
         # 检查事件序列（3 阶段：planning + writing + review）

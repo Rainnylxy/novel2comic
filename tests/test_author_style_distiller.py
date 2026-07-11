@@ -3,11 +3,11 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from src.continuation.author_style_profile import (
+from src.distillers.style_profile import (
     AuthorStyleProfile, SyntaxProfile, LexiconProfile,
     NarrativePatternProfile, AtmosphereProfile,
 )
-from src.continuation.author_style_distiller import AuthorStyleDistiller
+from src.distillers.style_distiller import AuthorStyleDistiller
 
 
 class TestAuthorStyleDistiller:

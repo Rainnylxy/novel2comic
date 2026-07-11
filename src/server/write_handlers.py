@@ -15,7 +15,7 @@ import queue
 
 import tornado.web
 
-from ..continuation.pipeline import ContinuationPipeline
+from ..pipeline.pipeline import ContinuationPipeline
 
 
 # 全局 pipeline（单例，同一时间只有一个续写会话）

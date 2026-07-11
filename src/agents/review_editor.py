@@ -14,13 +14,13 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from ..agents.base_agent import BaseAgent
+from .base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..context import GlobalContext, ServiceRegistry
-    from ..llm import UnifiedLLM
+    from ..core.context import GlobalContext, ServiceRegistry
+    from ..core.llm import UnifiedLLM
 
 
 class ReviewEditor(BaseAgent):

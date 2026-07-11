@@ -11,13 +11,12 @@ from typing import Optional, TYPE_CHECKING
 from agentflow.runtime.builder import AgentBuilder
 from agentflow.runtime.memory.manager import MemoryProfile, WorkingConfig
 from agentflow.runtime.thinking import ThinkingMode
-from agentflow.runtime.hooks import StreamEvent
 
 from ..agent_memory import AgentMemory
 
 if TYPE_CHECKING:
-    from ..context import GlobalContext, ServiceRegistry
-    from ..llm import UnifiedLLM
+    from ..core.context import AppContext, ServiceRegistry
+    from ..core.llm import UnifiedLLM
 
 SKILLS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -33,6 +32,9 @@ if not _trace_logger.handlers:
         datefmt="%H:%M:%S",
     ))
     _trace_logger.addHandler(_fh)
+    _sh = logging.StreamHandler()
+    _sh.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    _trace_logger.addHandler(_sh)
     _trace_logger.setLevel(logging.DEBUG)
 
 
@@ -48,14 +50,14 @@ class BaseAgent:
 
     def __init__(
         self,
-        ctx: "GlobalContext",
+        ctx: "AppContext",
         services: "ServiceRegistry",
-        llm: "UnifiedLLM",
+        llm: "UnifiedLLM" = None,  # 可选，优先从 services.llm 获取
         memory: Optional[AgentMemory] = None,
     ):
         self._ctx = ctx
         self._services = services
-        self._llm = llm
+        self._llm = llm or (services.llm if services else None)
         self._memory = memory or AgentMemory()
         self._identity_prompt: str = ""
         self._built_agent = None
@@ -103,8 +105,9 @@ class BaseAgent:
         return os.path.join(SKILLS_DIR, f"{self.SKILL_NAME}.md")
 
     def _get_memory_profile(self) -> MemoryProfile:
+        """子类可覆盖以调整记忆容量。"""
         return MemoryProfile(
-            working=WorkingConfig(max_turns=30),
+            working=WorkingConfig(max_turns=30, max_tokens=8000),
             episodic_max=500,
             semantic_enabled=False,
         )
@@ -120,7 +123,7 @@ class BaseAgent:
 
         builder = (
             AgentBuilder(self.SKILL_NAME)
-            .with_llm(self._ctx.agent_llm)
+            .with_llm(self._services.agent_llm)
             .with_skills_dir(SKILLS_DIR)
             .with_skill(self.SKILL_NAME)
             .with_tools(*tools)
@@ -154,41 +157,18 @@ class BaseAgent:
             if msg.role != "system":
                 self._built_agent.memory.working.add(msg)
 
-    # ── 追踪日志 ──
-
-    def _trace_stream(self, event: StreamEvent):
-        """Stream 回调：记录 AgentFlow ReAct 循环中的每个事件。"""
-        etype = event.type
-        if etype == "thinking":
-            content = (event.content or "")[:200]
-            _trace_logger.info("[%s] turn=%s thinking: %.200s",
-                               self.SKILL_NAME, getattr(event, 'turn', '?'), content)
-        elif etype == "tool_call":
-            name = getattr(event, 'tool_name', '') or event.data.get('name', '?')
-            args = event.data.get('args', {}) if event.data else {}
-            args_str = str(args)[:300]
-            _trace_logger.info("[%s] turn=%s tool_call: %s(%s)",
-                               self.SKILL_NAME, getattr(event, 'turn', '?'), name, args_str)
-        elif etype == "tool_result":
-            name = getattr(event, 'tool_name', '') or event.data.get('name', '?')
-            result = (event.content or "")[:300]
-            _trace_logger.info("[%s] turn=%s tool_result: %s → %.300s",
-                               self.SKILL_NAME, getattr(event, 'turn', '?'), name, result)
-        elif etype == "final":
-            _trace_logger.info("[%s] turn=%s final: %.300s",
-                               self.SKILL_NAME, getattr(event, 'turn', '?'),
-                               (event.content or "")[:300])
-        elif etype == "error":
-            _trace_logger.error("[%s] turn=%s error: %s",
-                                self.SKILL_NAME, getattr(event, 'turn', '?'),
-                                event.content or "")
-        elif etype == "progress":
-            _trace_logger.debug("[%s] progress: %s", self.SKILL_NAME, event.content or "")
-        else:
-            _trace_logger.debug("[%s] event=%s content=%.200s",
-                                self.SKILL_NAME, etype, (event.content or "")[:200])
-
     # ── 运行 ──
+
+    async def _live_stream(self, event):
+        """实时进度回调：工具调用和思考过程即时输出到终端和日志。"""
+        etype = event.type
+        data = event.data or {}
+        if etype == "tool_call":
+            name = data.get("tool", "?")
+            _trace_logger.info("[%s] → %s ...", self.SKILL_NAME, name)
+        elif etype == "thinking":
+            _trace_logger.debug("[%s] thinking: %.100s", self.SKILL_NAME,
+                                (event.content or "")[:100])
 
     async def run(self, task: str):
         if self._built_agent is None:
@@ -199,13 +179,68 @@ class BaseAgent:
 
         _trace_logger.info("[%s] >>> task: %.300s", self.SKILL_NAME, task)
 
-        result = await self._built_agent.run(task, stream=self._trace_stream)
+        try:
+            result = await self._built_agent.run(task, stream=self._live_stream)
+        except Exception as e:
+            _trace_logger.error("[%s] AgentFlow error: %s", self.SKILL_NAME, e)
+            import traceback
+            _trace_logger.error("[%s] Traceback:\n%s", self.SKILL_NAME,
+                                traceback.format_exc())
+            raise
+
+        # AgentFlow 内置 Trace：记录每轮思维、工具调用、耗时、token
+        self._log_agent_trace(result)
 
         _trace_logger.info("[%s] <<< done", self.SKILL_NAME)
 
         # Post-turn 钩子：子类可覆盖以写入 episodic memory 等
         self._on_post_turn(task, result)
         return result
+
+    def _log_agent_trace(self, result):
+        """将 AgentFlow 内置的 AgentTrace 写入日志。"""
+        trace = getattr(result, 'agent_trace', None)
+        if trace is None:
+            _trace_logger.warning("[%s] agent_trace not available", self.SKILL_NAME)
+            return
+
+        turns = getattr(trace, 'turns', []) or []
+        if not turns:
+            return
+
+        _trace_logger.info("[%s] === AgentTrace: %d turns ===",
+                           self.SKILL_NAME, len(turns))
+
+        for turn in turns:
+            tn = getattr(turn, 'turn', '?')
+            thinking = (getattr(turn, 'thinking', '') or '')[:200]
+            if thinking:
+                _trace_logger.info("[%s]   turn %s | thinking: %.200s",
+                                   self.SKILL_NAME, tn, thinking)
+
+            for tc in (getattr(turn, 'tool_calls', []) or []):
+                tool = getattr(tc, 'tool', '?')
+                inp = str(getattr(tc, 'input', {}))[:300]
+                out = str(getattr(tc, 'output', ''))[:300]
+                dur = getattr(tc, 'duration_ms', 0)
+                success = getattr(tc, 'success', True)
+                status = "✓" if success else "✗"
+                _trace_logger.info("[%s]   turn %s | %s %s(%s) → %.300s (%dms)",
+                                   self.SKILL_NAME, tn, status, tool, inp, out, dur)
+
+            final = (getattr(turn, 'final_answer', '') or '')[:500]
+            if final:
+                _trace_logger.info("[%s]   turn %s | final: %.500s",
+                                   self.SKILL_NAME, tn, final)
+
+        total_turns = getattr(trace, 'total_turns', len(turns))
+        total_calls = getattr(trace, 'total_tool_calls', 0)
+        total_tokens = getattr(trace, 'total_tokens', {})
+        total_ms = getattr(trace, 'total_duration_ms', 0)
+        _trace_logger.info("[%s] === Trace summary: %d turns, %d tool calls, "
+                           "tokens=%s, %dms ===",
+                           self.SKILL_NAME, total_turns, total_calls,
+                           total_tokens, total_ms)
 
     def _on_post_turn(self, user_msg: str, assistant_msg: str):
         """Post-turn 钩子。子类覆盖以实现记忆写入等逻辑。"""

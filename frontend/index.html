@@ -355,7 +355,7 @@
            placeholder="输入指令调整续写方向..."
            autocomplete="off">
     <button id="inject-btn" disabled>发送</button>
-    <button id="next-btn" style="display:none">下一章 ▶</button>
+    <button id="stop-btn" style="display:none">停止 ⏹</button>
   </div>
 </div>
 
@@ -381,7 +381,7 @@
   const fragContainer  = $('fragment-container');
   const injectInput    = $('inject-input');
   const injectBtn      = $('inject-btn');
-  const nextBtn        = $('next-btn');
+  const stopBtn        = $('stop-btn');
   const startForm      = $('start-form');
   const startBtn       = $('start-btn');
   const novelPathInput = $('novel-path');
@@ -497,25 +497,26 @@
           revising:  '修订中...'
         };
         setStatus(labels[data.phase] || data.phase, 'active');
-        // 只在写作阶段允许注入指令
-        if (data.phase === 'writing') {
+        // 写作和审校阶段允许注入指令（下一章生效）
+        setStatus(data.phase === 'planning' ? '规划中...' :
+                  data.phase === 'writing' ? '写作中...' :
+                  data.phase === 'reviewing' ? '审校修订中...' : data.phase, 'active');
+        if (data.phase === 'writing' || data.phase === 'reviewing') {
           injectBtn.disabled = false;
           injectInput.disabled = false;
           injectInput.placeholder = '💬 输入指令调整续写方向...';
-        } else {
-          injectBtn.disabled = true;
-          injectInput.disabled = true;
-          injectInput.placeholder = '等待进入写作阶段...';
         }
         break;
 
       case 'outline':
-        var title = data.title || ('第' + data.chapter_number + '章');
-        readerTitle.textContent = title + ' · 第' + data.chapter_number + '章';
-        // 插入章节分隔线
+        // data 可能是 {chapters: [chapter]} 或直接是 chapter dict
+        var ch = (data.chapters && data.chapters[0]) || data;
+        var chNum = ch.chapter_number || '?';
+        var chTitle = ch.title || ('第' + chNum + '章');
+        readerTitle.textContent = chTitle + ' · 第' + chNum + '章';
         appendFragment({
           type: 'divider',
-          divider_label: '第' + data.chapter_number + '章'
+          divider_label: '第' + chNum + '章「' + chTitle + '」'
         });
         break;
 
@@ -534,16 +535,28 @@
         break;
 
       case 'complete':
-        setStatus('本章完成 — 点击"下一章"继续', '');
+        var chNum = data.chapter || '?';
+        var chTitle = data.title || '';
+        var chCount = data.chapter_count || 1;
+        setStatus('第' + chNum + '章「' + chTitle + '」完成 — 正在规划下一章...', 'active');
         removeTypingCursor();
-        injectBtn.style.display = 'none';
-        injectInput.style.display = 'none';
-        nextBtn.style.display = 'inline-block';
+        injectBtn.disabled = false;
+        injectInput.disabled = false;
+        // stopBtn stays visible for manual interruption
         break;
 
       case 'done':
-        setStatus('就绪', '');
-        nextBtn.style.display = 'inline-block';
+        var written = data.chapters_written || 0;
+        var reason = data.reason || '';
+        var msg = written + ' 章完成';
+        if (reason === 'roadmap_exhausted') msg = '全部 ' + written + ' 章完成，故事告一段落';
+        else if (reason === 'stop_requested') msg = '已停止 (' + written + ' 章)';
+        else if (reason === 'max_chapters') msg = '已达上限 (' + written + ' 章)';
+        setStatus(msg, '');
+        removeTypingCursor();
+        injectBtn.style.display = 'none';
+        injectInput.style.display = 'none';
+        stopBtn.style.display = 'none';
         break;
 
       case 'error':
@@ -577,10 +590,10 @@
     injectInput.style.display = 'block';
     injectBtn.disabled = true;
     injectInput.disabled = true;
-    nextBtn.style.display = 'none';
+    stopBtn.style.display = 'inline-block';
     fragmentCount = 0;
 
-    await startStream();
+    await startStream(instruction);
     return;
 
     // dead code kept for safety
@@ -676,21 +689,19 @@
   }
 
   // ============================================================
-  // 下一章
+  // 停止续写
   // ============================================================
-  async function nextChapter() {
-    nextBtn.style.display = 'none';
-    injectBtn.style.display = 'inline-block';
-    injectInput.style.display = 'block';
-    injectBtn.disabled = true;
-    injectInput.disabled = true;
-    setStatus('规划中...', 'active');
-
-    // 复用 startWriting 的请求逻辑
-    await startStream();
+  function stopWriting() {
+    setStatus('正在停止...', 'active');
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
+    }
+    stopBtn.style.display = 'none';
   }
 
-  async function startStream() {
+  async function startStream(instruction) {
+    instruction = instruction || '';
     abortController = new AbortController();
     try {
       var resp = await fetch(API_BASE + '/api/write/start', {
@@ -698,7 +709,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           novel_path: novelPathInput.value.trim(),
-          instruction: ''
+          instruction: instruction
         }),
         signal: abortController.signal
       });
@@ -726,9 +737,12 @@
         }
       }
     } catch (err) {
-      if (err.name !== 'AbortError') {
-        setStatus('连接错误', 'error');
+      if (err.name === 'AbortError') {
+        setStatus('已停止', '');
+      } else {
+        setStatus('连接错误: ' + (err.message || err), 'error');
       }
+      stopBtn.style.display = 'none';
     }
   }
 
@@ -770,7 +784,7 @@
   });
 
   // 下一章按钮
-  nextBtn.addEventListener('click', nextChapter);
+  stopBtn.addEventListener('click', stopWriting);
   // 定期轮询状态（每 15 秒）
   setInterval(pollState, 15000);
 

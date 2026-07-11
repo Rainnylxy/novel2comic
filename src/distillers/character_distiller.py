@@ -16,14 +16,14 @@ import re
 from collections import Counter
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
-from .character_profile_models import VoiceProfile, BoundaryProfile, StateProfile, SensitivityProfile
+from .character_profile import VoiceProfile, BoundaryProfile, StateProfile, SensitivityProfile
 
 # PromptContext removed — distiller uses UnifiedLLM.chat_json() directly
 
 if TYPE_CHECKING:
     from .llm import UnifiedLLM
-    from .models import StoryGraph
-    from .character_profile_models import CharacterProfile
+    from ..core.models import StoryGraph
+    from .character_profile import CharacterProfile
 
 
 # ============================================================
@@ -263,7 +263,7 @@ class CharacterDistiller:
         Returns:
             CharacterProfile
         """
-        from .character_profile_models import (
+        from .character_profile import (
             CharacterProfile, VoiceProfile, BoundaryProfile,
             StateProfile, SensitivityProfile, RecoveryProfile,
             SensitivityEntry, PolicyAnchor,
@@ -648,7 +648,7 @@ class CharacterDistiller:
         self, name: str, char_text: str, char_summary: str,
     ) -> dict:
         """蒸馏 State、Sensitivity、Recovery。"""
-        from .character_profile_models import (
+        from .character_profile import (
             StateProfile, SensitivityProfile, RecoveryProfile, SensitivityEntry,
         )
 
@@ -700,7 +700,7 @@ class CharacterDistiller:
         self, name: str, char_text: str, char_summary: str,
     ) -> list:
         """蒸馏 Policy Anchors。"""
-        from .character_profile_models import PolicyAnchor
+        from .character_profile import PolicyAnchor
 
         if not char_text.strip():
             return []

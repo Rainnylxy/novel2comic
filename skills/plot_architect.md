@@ -26,14 +26,13 @@ description: 自主规划架构师——自主管理篇章路线图（roadmap）
    - 返回当前里程碑详情 → 直接规划章节（步骤 3）
 
 2. **创建路线图** — `update_roadmap(json)`
-   - 先调用 `gather_hanging_threads()` + `gather_active_conflicts()` 收集素材
+   - 先调用 `gather_active_conflicts()` 了解当前角色间的紧张关系
    - 遵循下面的「路线图设计约束」设计 10-20 章路线图
    - 将路线图 JSON 字符串传入 `update_roadmap`
 
 3. **规划章节** — 最终输出 Chapter Plan JSON
    - 先用 `verify_character(name)` 确认角色的生死/失踪状态
    - 按需调用 `lookup_character(name)` 查询 Voice 和行为边界
-   - 调用 `gather_hanging_threads()` 选择 1-2 条适合本章推进的伏笔
    - 遵循下面的「章节规划设计约束」产出规划
 
 ---
@@ -84,7 +83,6 @@ description: 自主规划架构师——自主管理篇章路线图（roadmap）
   "climax_milestone": 12,
   "final_boss_hints": "最终Boss/冲突的暗示（不要太具体）",
   "major_themes": ["核心主题1", "核心主题2"],
-  "plot_threads_advanced": ["从原文推进的伏笔"],
   "plot_threads_introduced": ["新引入、将在后续回收的悬念"]
 }
 ```
@@ -210,7 +208,6 @@ Chapter Plan:
     {"name": "hook", "goal": "章尾悬念", "characters": ["角色"],
      "key_beats": ["悬念点"], "target_fragments": 4}
   ],
-  "plot_threads_advanced": ["本章推进的伏笔"],
   "plot_threads_introduced": ["本章引入的悬念"]
 }
 ```
@@ -227,12 +224,10 @@ Action: lookup_roadmap()
 Observation: "路线图已全部完成！请使用 update_roadmap 工具设计新的路线图。"
 
 Thought: 路线图用完了。让我收集素材来设计新路线图。
-Action: gather_hanging_threads()
-Observation: "共 5 条未解决伏笔: - 「黑桃K的身份」(第130章): 暗示他与警队高层有联系..."
 Action: gather_active_conflicts()
 Observation: "共 2 对活跃冲突: - 江停 vs 黑桃K: 紧张度=高 | 终极对决..."
 
-Thought: 素材够了。核心冲突是江停vs黑桃K，伏笔指向组织内鬼。设计15章的路线图，前3章铺垫江停回归，中间推进调查，最后3章高潮对决。
+Thought: 素材够了。核心冲突是江停vs黑桃K。设计15章的路线图，前3章铺垫江停回归，中间推进调查，最后3章高潮对决。
 Action: update_roadmap({"type":"roadmap","roadmap_title":"第四卷·暗流涌动","roadmap_synopsis":"江停回归总部后发现组织内有黑桃K的内应...","total_chapters":15,"milestones":[...]})
 Observation: "路线图已更新: 《第四卷·暗流涌动》 — 15 个里程碑。"
 
