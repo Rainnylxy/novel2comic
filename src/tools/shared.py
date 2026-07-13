@@ -333,34 +333,30 @@ class SharedToolKit:
         from agentflow.runtime.toolkit import tool
         shared = self
 
-        @tool
         def lookup_character(name: str) -> str:
             return shared.lookup_character(name)
-
-        # 保留原始 docstring
         lookup_character.__doc__ = self.lookup_character.__doc__
-        return lookup_character
+
+        return tool(lookup_character)
 
     def make_gather_active_conflicts(self):
         """创建 @tool 包装的 gather_active_conflicts。"""
         from agentflow.runtime.toolkit import tool
         shared = self
 
-        @tool
         def gather_active_conflicts() -> str:
             return shared.gather_active_conflicts()
-
         gather_active_conflicts.__doc__ = self.gather_active_conflicts.__doc__
-        return gather_active_conflicts
+
+        return tool(gather_active_conflicts)
 
     def make_recall_foreshadowing(self):
         """创建 @tool 包装的 recall_foreshadowing。"""
         from agentflow.runtime.toolkit import tool
         shared = self
 
-        @tool
         def recall_foreshadowing() -> str:
             return shared.recall_foreshadowing()
-
         recall_foreshadowing.__doc__ = self.recall_foreshadowing.__doc__
-        return recall_foreshadowing
+
+        return tool(recall_foreshadowing)
