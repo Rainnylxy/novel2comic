@@ -837,11 +837,11 @@ class ContinuationPipeline:
         # 从 markdown 代码块或 JSON 块中提取
         import re
         for pattern in [
-            r'```(?:json)?\s*\n?(.*?)\n?```',
-            r'\{.*"type".*"(?:roadmap|chapter)".*\}',
-            r'\{.*"chapter_number".*\}',
-            r'\{.*"roadmap_title".*\}',
-            r'\{.*"sections".*\}',
+            r'```(?:json)?\s*\n?(.*?)\n?```',          # ```json ... ```
+            r'\{.*"type"\s*:\s*"(?:roadmap|chapter)".*\}',  # JSON object
+            r'\{.*"chapter_number"\s*:.*\}',
+            r'\{.*"roadmap_title"\s*:.*\}',
+            r'\{.*"sections"\s*:.*\}',
         ]:
             m = re.search(pattern, text, re.DOTALL)
             if m:
@@ -850,6 +850,15 @@ class ContinuationPipeline:
                     return json.loads(group)
                 except (json.JSONDecodeError, IndexError):
                     continue
+
+        # 兜底：找第一个 { 到最后一个 } 之间的内容
+        first_brace = text.find('{')
+        last_brace = text.rfind('}')
+        if first_brace >= 0 and last_brace > first_brace:
+            try:
+                return json.loads(text[first_brace:last_brace + 1])
+            except json.JSONDecodeError:
+                pass
 
         return {}
 

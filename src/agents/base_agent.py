@@ -5,6 +5,7 @@
 Trace 由 AgentFlow 内置 AgentTrace 负责，不自行实现。
 """
 
+import json
 import logging
 import os
 from typing import Optional, TYPE_CHECKING
@@ -25,6 +26,19 @@ SKILLS_DIR = os.path.join(
 )
 
 logger = logging.getLogger("base_agent")
+if not logger.handlers:
+    _sh = logging.StreamHandler()
+    _sh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    logger.addHandler(_sh)
+    logger.setLevel(logging.DEBUG)
+
+# Trace 落盘：AgentFlow 的 AgentTrace 在此持久化
+_trace_log = logging.getLogger("agentflow.trace")
+if not _trace_log.handlers:
+    _fh = logging.FileHandler("agent_trace.log", encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    _trace_log.addHandler(_fh)
+    _trace_log.setLevel(logging.DEBUG)
 
 
 class BaseAgent:
@@ -229,11 +243,27 @@ class BaseAgent:
 
         self._pre_run()
 
+        print(f"[{self.SKILL_NAME}] running task ({len(task)} chars)...", flush=True)
         try:
             result = await self._built_agent.run(task, stream=self._live_stream)
         except Exception as e:
             logger.error("[%s] AgentFlow error: %s", self.SKILL_NAME, e)
+            print(f"[{self.SKILL_NAME}] ERROR: {e}", flush=True)
             raise
+
+        output = getattr(result, 'output', str(result))
+        print(f"[{self.SKILL_NAME}] done, output ({len(output)} chars): {output[:200]}...", flush=True)
+
+        # AgentFlow 内置 Trace 落盘
+        trace = getattr(result, 'agent_trace', None)
+        print(f"[{self.SKILL_NAME}] agent_trace present: {trace is not None}", flush=True)
+        if trace is not None:
+            try:
+                data = trace.to_dict()
+                _trace_log.info(json.dumps(data, ensure_ascii=False, indent=2))
+                print(f"[{self.SKILL_NAME}] trace dumped ({trace.total_turns} turns)", flush=True)
+            except Exception as e:
+                print(f"[{self.SKILL_NAME}] trace dump failed: {e}", flush=True)
 
         self._on_post_turn(task, result)
         return result

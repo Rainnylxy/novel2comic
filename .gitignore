@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 src/projects/
 plot_architect.log
+agent_trace.log
