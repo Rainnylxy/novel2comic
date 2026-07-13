@@ -36,6 +36,10 @@ class ChapterWriter(BaseAgent):
 
     SKILL_NAME = "chapter_writer"
 
+    def _get_system_prompt(self) -> str:
+        """热加载：skill body 直接注入 system prompt，不走 use_skill_xxx。"""
+        return self._load_skill_body()
+
     def __init__(self, ctx, services, llm, memory=None):
         super().__init__(ctx, services, llm, memory)
         self._kg = services.kg
@@ -94,6 +98,61 @@ class ChapterWriter(BaseAgent):
 
         # 预加载本章涉及的所有角色，注入 user prompt，避免每节重复 lookup_character
         self._preloaded_chars_text = self._preload_characters()
+
+    # ================================================================
+    # Reference 卡（BaseAgent._pre_run() 自动拉取）
+    # ================================================================
+
+    def _get_references(self) -> dict[str, str]:
+        """提供稳定的 Reference 卡内容。BaseAgent 负责在每次 run() 前推入。"""
+        refs = {}
+
+        # ── 角色状态硬约束 ──
+        if self._character_statuses:
+            dead = [n for n, s in self._character_statuses.items()
+                    if s in ("dead", "deceased", "killed")]
+            missing = [n for n, s in self._character_statuses.items()
+                       if s == "missing"]
+            lines = []
+            if dead:
+                lines.append(f"已死亡: {', '.join(dead)}（只能以回忆/闪回出现）")
+            if missing:
+                lines.append(f"下落不明: {', '.join(missing)}（不能直接出场）")
+            if lines:
+                refs["character_statuses"] = "\n".join(lines)
+
+        # ── 文风概要 ──
+        if self._style_profile:
+            atmos = self._style_profile.atmosphere
+            narrative = self._style_profile.narrative
+            lines = []
+            if atmos.overall_tone:
+                lines.append(f"基调: {atmos.overall_tone}")
+            if atmos.emotional_tendency:
+                lines.append(f"情感倾向: {atmos.emotional_tendency}")
+            if narrative.cliffhanger_style:
+                lines.append(f"章尾钩子: {narrative.cliffhanger_style}")
+            if narrative.scene_transition_style:
+                lines.append(f"场景过渡: {narrative.scene_transition_style}")
+            if lines:
+                refs["style_profile"] = "\n".join(lines)
+
+        # ── 核心角色 Voice 概要 ──
+        if self._character_profiles:
+            voice_lines = []
+            for name, profile in list(self._character_profiles.items())[:8]:
+                if hasattr(profile, 'voice') and profile.voice:
+                    v = profile.voice
+                    parts = [f"{name}:"]
+                    if v.summary:
+                        parts.append(f"  {v.summary[:100]}")
+                    if v.taboo_words:
+                        parts.append(f"  禁用词: {', '.join(v.taboo_words[:5])}")
+                    voice_lines.append("\n".join(parts))
+            if voice_lines:
+                refs["character_voices"] = "\n\n".join(voice_lines)
+
+        return refs
 
     def _preload_characters(self) -> str:
         """预加载本章涉及的所有角色，返回格式化摘要供注入 user prompt。"""
@@ -173,34 +232,6 @@ class ChapterWriter(BaseAgent):
                             lines.append(f"行为锚点: {s} → {act}")
 
         return "\n".join(lines) if len(lines) > 1 else ""
-        """构建 Push 上下文（拼接到 task 前，不缓存）。
-
-        只包含变化的数据：角色状态硬约束 + 风格概要。
-        角色 Voice/Boundary 细节通过 lookup_character 工具 Pull。
-        """
-        parts = []
-
-        # 角色生死状态（硬约束 —— Push）
-        if self._character_statuses:
-            dead_chars = [n for n, s in self._character_statuses.items()
-                          if s in ("dead", "deceased", "killed")]
-            missing_chars = [n for n, s in self._character_statuses.items()
-                             if s == "missing"]
-            if dead_chars:
-                parts.append(f"## ⚠️ 已死亡角色: {', '.join(dead_chars)}")
-                parts.append("只能以回忆/闪回/他人提及出现，绝不能写他们的对话或动作。")
-            if missing_chars:
-                parts.append(f"## ⚠️ 下落不明角色: {', '.join(missing_chars)}")
-                parts.append("不能直接出场，只能通过线索/回忆间接涉及。")
-
-        # 文风概要（轻量 Push）
-        if self._style_profile:
-            parts.append(self._style_profile.summary())
-            exemplars_text = self._style_profile.exemplars_text()
-            if exemplars_text:
-                parts.append(exemplars_text)
-
-        return "\n".join(parts) if parts else ""
 
     # ================================================================
     # 流式接口（供 Pipeline 调用）

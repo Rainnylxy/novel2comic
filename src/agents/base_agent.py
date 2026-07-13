@@ -62,6 +62,7 @@ class BaseAgent:
         self._identity_prompt: str = ""
         self._built_agent = None
         self._needs_rebuild = False
+        self._pending_references: dict[str, str] = {}  # Agent 未构建时暂存
 
     # ── 身份 Prompt ──
 
@@ -112,34 +113,127 @@ class BaseAgent:
             semantic_enabled=False,
         )
 
+    # ── Reference 卡 ──
+
+    def _get_references(self) -> dict[str, str]:
+        """子类覆盖此方法以提供 Reference 卡内容。
+
+        返回 {key: content} 映射。BaseAgent 负责在合适的时机推入 _built_agent。
+
+        Reference 卡放什么:
+          - 文风、角色 Voice、死活约束等不常变的基础信息
+          - 跨 run() 持久、永不裁剪、不占 Working Memory 配额
+
+        不放什么:
+          - 每章/每节变化的内容（走 Dynamic Prefix 字符串）
+
+        默认返回空（不推任何 reference）。
+        """
+        return {}
+
+    def set_reference(self, key: str, content: str):
+        """设置一条 Reference 卡。跨 run() 持久，永不裁剪。
+
+        Agent 未构建时缓存到 _pending_references，build() 时自动应用。
+        Agent 已构建时直接写入 _built_agent.reference。
+        """
+        if self._built_agent is not None:
+            self._built_agent.set_reference(key, content)
+        else:
+            self._pending_references[key] = content
+
+    def _flush_pending_references(self):
+        """将缓存的 reference 写入已构建的 Agent。"""
+        if self._built_agent is None or not self._pending_references:
+            return
+        for key, content in self._pending_references.items():
+            self._built_agent.set_reference(key, content)
+        self._pending_references.clear()
+
+    def _apply_references(self):
+        """从 _get_references() 拉取并推入 Reference 卡。"""
+        for key, content in self._get_references().items():
+            self.set_reference(key, content)
+
     # ── Agent 构建 ──
+
+    def _load_skill_body(self) -> str:
+        """从 skill 文件读取正文（跳过 YAML frontmatter）。
+
+        供子类的 _get_system_prompt() 调用。
+        """
+        path = self._get_skill_path()
+        if not os.path.exists(path):
+            _trace_logger.warning("[%s] skill 文件不存在: %s", self.SKILL_NAME, path)
+            return ""
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as e:
+            _trace_logger.warning("[%s] skill 读取失败: %s", self.SKILL_NAME, e)
+            return ""
+
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                return parts[2].strip()
+        return content.strip()
+
+    def _get_system_prompt(self) -> str:
+        """子类覆盖此方法以提供自定义 system prompt。
+
+        返回 ""  →  走 AgentFlow 懒加载（with_skill）
+        返回非空  →  直接注入 system prompt（热加载，不走 use_skill_xxx）
+
+        默认返回 ""（懒加载）。子类覆盖 + 调用 self._load_skill_body() 即可热加载。
+        """
+        return ""
 
     async def build(self):
         if not self.SKILL_NAME:
             raise ValueError("SKILL_NAME 未设置")
 
+        if self._services is None or self._services.agent_llm is None:
+            raise RuntimeError("services.agent_llm 未初始化，无法构建 Agent")
+
         tools = self._build_tools()
         tool_names = [getattr(t, '__name__', str(t)) for t in tools]
+
+        # 系统 prompt：子类覆盖 _get_system_prompt() 决定懒加载还是热加载
+        system_prompt = self._get_system_prompt()
 
         builder = (
             AgentBuilder(self.SKILL_NAME)
             .with_llm(self._services.agent_llm)
-            .with_skills_dir(SKILLS_DIR)
-            .with_skill(self.SKILL_NAME)
             .with_tools(*tools)
             .with_memory(self._get_memory_profile())
             .with_thinking(ThinkingMode.REACT)
             .with_max_iterations(15)
         )
 
-        if self._identity_prompt:
-            builder = builder.with_prompt(self._identity_prompt)
+        if system_prompt:
+            # 热加载模式：skill body 直接注入 system prompt
+            # identity_prompt 如果设置了就叠加在前面
+            if self._identity_prompt:
+                system_prompt = self._identity_prompt + "\n\n" + system_prompt
+            builder = builder.with_prompt(system_prompt)
+            _trace_logger.info("[%s] build: skill=%s (eager, %d chars) tools=%s max_iter=15",
+                               self.SKILL_NAME, self.SKILL_NAME,
+                               len(system_prompt), tool_names)
+        else:
+            # 懒加载模式：使用 AgentFlow with_skill（LLM 首轮调用 use_skill_xxx）
+            builder = builder.with_skills_dir(SKILLS_DIR).with_skill(self.SKILL_NAME)
+            if self._identity_prompt:
+                builder = builder.with_prompt(self._identity_prompt)
+            _trace_logger.info("[%s] build: skill=%s (lazy) tools=%s max_iter=15",
+                               self.SKILL_NAME, self.SKILL_NAME, tool_names)
 
         agent = await builder.build()
 
-        # 追踪：构建信息
-        _trace_logger.info("[%s] build: skill=%s tools=%s max_iter=15",
-                           self.SKILL_NAME, self.SKILL_NAME, tool_names)
+        # 应用 build 前缓存的 reference 卡
+        self._built_agent = agent
+        self._flush_pending_references()
 
         return agent
 
@@ -170,12 +264,22 @@ class BaseAgent:
             _trace_logger.debug("[%s] thinking: %.100s", self.SKILL_NAME,
                                 (event.content or "")[:100])
 
+    def _pre_run(self):
+        """每次 run() 前自动拉取 _get_references() 推入 Reference 卡。
+
+        子类只需覆盖 _get_references() 返回 {key: content} 映射即可。
+        """
+        self._apply_references()
+
     async def run(self, task: str):
         if self._built_agent is None:
             self._built_agent = await self.build()
         elif self._needs_rebuild:
             await self.rebuild()
             self._needs_rebuild = False
+
+        # 子类钩子：更新 Reference 卡等
+        self._pre_run()
 
         _trace_logger.info("[%s] >>> task: %.300s", self.SKILL_NAME, task)
 

@@ -127,6 +127,10 @@ class PlotArchitect(BaseAgent):
 
     SKILL_NAME = "plot_architect"
 
+    def _get_system_prompt(self) -> str:
+        """热加载：skill body 直接注入 system prompt，不走 use_skill_xxx。"""
+        return self._load_skill_body()
+
     def __init__(self, ctx: "GlobalContext", services: "ServiceRegistry",
                  llm: "UnifiedLLM", memory=None):
         super().__init__(ctx, services, llm, memory)
@@ -151,6 +155,63 @@ class PlotArchitect(BaseAgent):
 
         # 应用层故事记忆（Pipeline 传入，Architect 只读引用）
         self._story_memory: Optional[object] = None
+
+    # ================================================================
+    # Reference 卡（BaseAgent._pre_run() 自动拉取）
+    # ================================================================
+
+    def _get_references(self) -> dict[str, str]:
+        """提供稳定的 Reference 卡内容。BaseAgent 负责在每次 run() 前推入。"""
+        refs = {}
+
+        # ── 角色状态硬约束 ──
+        if self._character_statuses:
+            dead = [n for n, s in self._character_statuses.items()
+                    if s in ("dead", "deceased", "killed")]
+            missing = [n for n, s in self._character_statuses.items()
+                       if s == "missing"]
+            lines = []
+            if dead:
+                lines.append(f"已死亡: {', '.join(dead)}")
+                lines.append("只能以回忆/闪回出现，绝不能以存活状态出场")
+            if missing:
+                lines.append(f"下落不明: {', '.join(missing)}")
+                lines.append("不能直接出场，只能通过线索/回忆间接涉及")
+            if lines:
+                refs["character_statuses"] = "\n".join(lines)
+
+        # ── 文风概要 ──
+        if self._style_profile:
+            atmos = self._style_profile.atmosphere
+            narrative = self._style_profile.narrative
+            lines = []
+            if atmos.overall_tone:
+                lines.append(f"基调: {atmos.overall_tone}")
+            if atmos.emotional_tendency:
+                lines.append(f"情感倾向: {atmos.emotional_tendency}")
+            if narrative.cliffhanger_style:
+                lines.append(f"章尾钩子: {narrative.cliffhanger_style}")
+            if narrative.scene_transition_style:
+                lines.append(f"场景过渡: {narrative.scene_transition_style}")
+            if lines:
+                refs["style_profile"] = "\n".join(lines)
+
+        # ── 核心角色 Voice 概要 ──
+        if self._character_profiles:
+            voice_lines = []
+            for name, profile in list(self._character_profiles.items())[:8]:
+                if hasattr(profile, 'voice') and profile.voice:
+                    v = profile.voice
+                    parts = [f"{name}:"]
+                    if v.summary:
+                        parts.append(f"  {v.summary[:100]}")
+                    if v.taboo_words:
+                        parts.append(f"  禁用词: {', '.join(v.taboo_words[:5])}")
+                    voice_lines.append("\n".join(parts))
+            if voice_lines:
+                refs["character_voices"] = "\n\n".join(voice_lines)
+
+        return refs
 
     # ================================================================
     # 上下文设置
@@ -218,43 +279,12 @@ class PlotArchitect(BaseAgent):
     # ================================================================
 
     def _build_dynamic_prefix(self) -> str:
-        """构建 Push 上下文 —— 锚点数据，Agent 必须一眼看到。
+        """构建每章变化的动态上下文。
 
-        不包含:
-          - 完整角色档案 → lookup_character 工具
-          - 所有伏笔 → gather_hanging_threads 工具
-          - 全部冲突 → gather_active_conflicts 工具
+        稳定内容（文风、角色死活、Voice）已走 _get_references() → Reference 卡。
+        这里只放每次 run() 都变的内容：路线图进度、前序章节、结尾文本。
         """
         parts = []
-
-        # ── 角色状态硬约束 ──
-        if self._character_statuses:
-            dead = [n for n, s in self._character_statuses.items()
-                    if s in ("dead", "deceased", "killed")]
-            missing = [n for n, s in self._character_statuses.items()
-                       if s == "missing"]
-            if dead:
-                parts.append(f"## ⚠️ 已死亡角色: {', '.join(dead)}")
-                parts.append("只能以回忆/闪回/他人提及出现，绝不能以存活状态出场。")
-            if missing:
-                parts.append(f"## ⚠️ 下落不明角色: {', '.join(missing)}")
-                parts.append("不能直接出场，只能通过线索/回忆间接涉及。")
-
-        # ── 风格锚点 ──
-        if self._style_profile:
-            atmos = self._style_profile.atmosphere
-            narrative = self._style_profile.narrative
-            lines = []
-            if atmos.overall_tone:
-                lines.append(f"基调: {atmos.overall_tone}")
-            if atmos.emotional_tendency:
-                lines.append(f"情感倾向: {atmos.emotional_tendency}")
-            if narrative.cliffhanger_style:
-                lines.append(f"章尾钩子风格: {narrative.cliffhanger_style}")
-            if narrative.scene_transition_style:
-                lines.append(f"场景过渡: {narrative.scene_transition_style}")
-            if lines:
-                parts.append("## 文风概要\n" + "\n".join(lines))
 
         # ── 路线图上下文 ──
         store = self._roadmap_store or {}
@@ -324,23 +354,16 @@ class PlotArchitect(BaseAgent):
     # ================================================================
 
     async def run(self, task: str = ""):
-        """运行 Plot Architect 的 ReAct 循环。
+        """运行 ReAct 循环。
 
-        将动态前缀（Push 上下文）拼接到 task 前面，
-        然后委托给 BaseAgent.run() → AgentFlow ReAct。
+        Stable context → self.set_reference()（永不裁剪）
+        Dynamic context → _build_dynamic_prefix()（拼接到 task）
         """
         prefix = self._build_dynamic_prefix()
         full_task = (prefix + "\n\n" + task) if prefix else task
 
         logger.info("PlotArchitect task: %.200s", task)
-        result = await super().run(full_task)
-
-        # 记录完整输出（Chapter Plan JSON 或 Roadmap JSON）
-        from agentflow.runtime.builder import AgentResult
-        output = result.output if isinstance(result, AgentResult) else str(result)
-        logger.info("PlotArchitect 输出:\n%s", output)
-
-        return result
+        return await super().run(full_task)
 
     # ================================================================
     # 角色验证辅助方法

@@ -31,6 +31,10 @@ class ReviewEditor(BaseAgent):
 
     SKILL_NAME = "review_editor"
 
+    def _get_system_prompt(self) -> str:
+        """热加载：skill body 直接注入 system prompt，不走 use_skill_xxx。"""
+        return self._load_skill_body()
+
     def __init__(self, ctx: "GlobalContext", services: "ServiceRegistry",
                  llm: "UnifiedLLM", memory=None):
         super().__init__(ctx, services, llm, memory)
