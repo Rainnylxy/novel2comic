@@ -561,7 +561,7 @@ class ContinuationPipeline:
         if not self.architect or not self.writer or not self.review_editor:
             raise RuntimeError("请先调用 load_novel() 加载小说")
 
-        max_chapters = int(os.getenv("MAX_CHAPTERS", "50"))
+        max_chapters = int(os.getenv("MAX_CHAPTERS", "5"))
         self._stop_requested = False
         self._fragment_count = 0
         chapter_count = 0
@@ -747,6 +747,11 @@ class ContinuationPipeline:
                 "chapter_count": chapter_count,
                 "total_fragments": self._fragment_count,
             })
+
+            # ── 持久化完整章节数据（规划 + 片段 + 审校） ──
+            if project_dir:
+                self._save_chapter_full(project_dir, ch_num, chapter,
+                                        revised, changes, score)
 
             # 首次指令只用一次
             active_instruction = ""
@@ -1025,8 +1030,8 @@ class ContinuationPipeline:
         except Exception:
             pass
 
-    @staticmethod
-    def _save_chapter_plan(project_dir: str, chapter_number: int, chapter: dict):
+    def _save_chapter_plan(self, project_dir: str, chapter_number: int,
+                           chapter: dict):
         """持久化单章章节规划到磁盘，便于审查。"""
         if not project_dir:
             return
@@ -1034,6 +1039,33 @@ class ContinuationPipeline:
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(chapter, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _save_chapter_full(self, project_dir: str, chapter_number: int,
+                           chapter_plan: dict, revised_fragments: list,
+                           changes: list, overall_score):
+        """持久化完整章节数据：规划 + 片段 + 审校结果。
+
+        覆盖 _save_chapter_plan 写入的文件，追加 fragments、review。
+        eval 系统的 collect_fixtures.py 从此文件提取质量评分和错误检测所需数据。
+        """
+        if not project_dir:
+            return
+        path = os.path.join(project_dir, f"chapter_{chapter_number:04d}.json")
+
+        # 合并：保留原有规划字段 + 追加写作和审校数据
+        full = dict(chapter_plan)
+        full["fragments"] = revised_fragments
+        full["fragment_count"] = len(revised_fragments)
+        full["review"] = {
+            "changes": changes,
+            "overall_score": overall_score,
+            "change_count": len(changes),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(full, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 
