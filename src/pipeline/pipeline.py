@@ -249,6 +249,9 @@ class ContinuationPipeline:
         self._init_agents()
         print("完成")
 
+        # 7. Session 恢复：检测已生成章节并从断点继续
+        self._restore_session(project_dir)
+
     def _get_character_statuses(self) -> dict:
         """获取角色状态映射（从 StoryMemory 读取）。
 
@@ -1068,6 +1071,119 @@ class ContinuationPipeline:
                 json.dump(full, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    # ================================================================
+    # Session 恢复：扫描已生成章节并从断点继续
+    # ================================================================
+
+    @staticmethod
+    def _scan_generated_chapters(project_dir: str, original_count: int) -> list:
+        """扫描 project_dir 中已生成的续写章节号列表。
+
+        Args:
+            project_dir: 项目输出目录
+            original_count: 原文章节数，仅返回大于此数的章节号
+
+        Returns:
+            已排序的章节号列表，仅包含续写生成的章节
+        """
+        if not project_dir or not os.path.isdir(project_dir):
+            return []
+        chapters = []
+        pattern = re.compile(r'^chapter_(\d+)\.json$')
+        for fname in os.listdir(project_dir):
+            m = pattern.match(fname)
+            if m:
+                ch_num = int(m.group(1))
+                if ch_num > original_count:
+                    chapters.append(ch_num)
+        chapters.sort()
+        return chapters
+
+    @staticmethod
+    def _load_chapter_full_from_disk(project_dir: str, chapter_number: int) -> dict:
+        """从磁盘加载单章完整数据（规划 + fragments + 审校）。
+
+        Returns:
+            章节数据 dict，文件不存在或解析失败返回空 dict
+        """
+        path = os.path.join(project_dir, f"chapter_{chapter_number:04d}.json")
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _restore_session(self, project_dir: str):
+        """扫描已生成章节，恢复续写进度。
+
+        从 project_dir/chapter_XXXX.json 检测已生成的续写章节，
+        恢复 _chapter、_previous_chapter_ending、_story_memory。
+
+        Args:
+            project_dir: 项目输出目录
+        """
+        if not project_dir:
+            return
+
+        original_count = self._chapter
+        generated = self._scan_generated_chapters(project_dir, original_count)
+        if not generated:
+            return
+
+        max_gen = max(generated)
+        self._chapter = max_gen
+        print(f"[Resume] 检测到 {len(generated)} 章已生成续写章节 "
+              f"(第{min(generated)}-{max_gen}章)，从第{max_gen + 1}章继续")
+
+        # 恢复最后一章结尾上下文（供下一章 Writer 衔接）
+        last = self._load_chapter_full_from_disk(project_dir, max_gen)
+        if last:
+            fragments = last.get("fragments", [])
+            if fragments:
+                recent = fragments[-3:]
+                self._previous_chapter_ending = "\n".join(
+                    (f"{f.get('character', '')}: " if f.get('character') else "")
+                    + f.get('text', '')
+                    for f in recent
+                )
+                print(f"[Resume] 从第{max_gen}章恢复结尾上下文 "
+                      f"({len(self._previous_chapter_ending)} 字)")
+
+        # 恢复 StoryMemory：章节规划历史 + 伏笔列表
+        restored_plans = 0
+        restored_threads = 0
+        for ch_num in sorted(generated):
+            ch_data = self._load_chapter_full_from_disk(project_dir, ch_num)
+            if not ch_data:
+                continue
+            plan_summary = {
+                "chapter_number": ch_data.get("chapter_number", ch_num),
+                "title": ch_data.get("title", ""),
+                "synopsis": ch_data.get("synopsis", ""),
+                "characters_involved": (
+                    list(ch_data.get("character_beats", {}).keys())
+                    if isinstance(ch_data.get("character_beats"), dict) else []
+                ),
+                "key_events": [
+                    s.get("goal", "")
+                    for s in ch_data.get("sections", [])
+                ],
+                "plot_threads_introduced": ch_data.get("plot_threads_introduced", []),
+            }
+            self._story_memory.add_chapter_plan(plan_summary)
+            restored_plans += 1
+
+            for t in ch_data.get("plot_threads_introduced", []):
+                self._story_memory.add_thread(t, ch_num)
+                restored_threads += 1
+
+        self._chapter_plan_history = self._story_memory.chapter_plans
+        self._introduced_threads = self._story_memory.get_pending_threads()
+        print(f"[Resume] StoryMemory 已恢复: {restored_plans} 个章节规划, "
+              f"{restored_threads} 条伏笔")
 
     def _parse_review_result(self, raw) -> dict:
         """解析 ReviewEditor 输出：{revised_fragments, changes, overall_score}。"""
