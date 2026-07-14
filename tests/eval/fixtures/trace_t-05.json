@@ -1,0 +1,15 @@
+{
+  "agent": "ChapterWriter",
+  "turns": [
+    {
+      "turn": 1,
+      "thought": "高潮节涉及江停，先查档案",
+      "tool_calls": [{ "name": "lookup_character", "args": { "name": "江停" } }]
+    },
+    {
+      "turn": 2,
+      "thought": "高潮节要回收或推进伏笔，先查活跃伏笔",
+      "tool_calls": [{ "name": "recall_foreshadowing", "args": {} }]
+    }
+  ]
+}

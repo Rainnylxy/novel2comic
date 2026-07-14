@@ -1,0 +1,25 @@
+{
+  "agent": "PlotArchitect",
+  "turns": [
+    {
+      "turn": 1,
+      "thought": "先确认路线图进度",
+      "tool_calls": [{ "name": "lookup_roadmap", "args": {} }]
+    },
+    {
+      "turn": 2,
+      "thought": "当前里程碑涉及江停和严峫，先验证状态",
+      "tool_calls": [{ "name": "verify_character", "args": { "name": "江停" } }]
+    },
+    {
+      "turn": 3,
+      "thought": "江停活跃，查他的具体档案",
+      "tool_calls": [{ "name": "lookup_character", "args": { "name": "江停" } }]
+    },
+    {
+      "turn": 4,
+      "thought": "再查严峫",
+      "tool_calls": [{ "name": "lookup_character", "args": { "name": "严峫" } }]
+    }
+  ]
+}
