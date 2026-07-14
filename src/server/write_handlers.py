@@ -232,6 +232,15 @@ class ChapterDetailHandler(tornado.web.RequestHandler):
             self.write({"error": "No active session"})
             return
 
+        original_count = (
+            len(_active_pipeline._ctx.novel.chapters)
+            if _active_pipeline._ctx.novel else 0
+        )
+        if chapter_number <= original_count:
+            self.set_status(404)
+            self.write({"error": f"Chapter {chapter_number} is not a continuation chapter"})
+            return
+
         project_dir = (_active_pipeline._ctx.novel.output_dir
                        if _active_pipeline._ctx.novel else "")
 
