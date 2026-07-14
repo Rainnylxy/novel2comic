@@ -754,6 +754,9 @@ class ContinuationPipeline:
             # ── 应用层记忆更新 ──
             self._story_memory.post_chapter(chapter, draft_fragments, ch_num)
 
+            # ── KG 增量更新：将新章节的角色/事件/关系回写到知识图谱 ──
+            await self._update_kg_with_new_chapter(draft_fragments, ch_num, project_dir)
+
             # ── 章节压缩检查 ──
             if len(self._story_memory.chapter_plans) > 10:
                 await self._story_memory.compact(self._llm)
@@ -803,6 +806,84 @@ class ContinuationPipeline:
         self._verify_characters_in_text(instruction)
         if self.writer:
             await self.writer.inject(instruction)
+
+    async def _update_kg_with_new_chapter(self, fragments: list, ch_num: int,
+                                          project_dir: str):
+        """将新章节内容增量更新到知识图谱。
+
+        从 draft_fragments 拼接章节文本，调用 KG 增量更新，
+        新角色/事件/关系会被合并到 StoryGraph 中。
+
+        Args:
+            fragments: 本章所有 StoryFragment 列表
+            ch_num: 本章章节号
+            project_dir: 项目输出目录（用于保存更新后的 KG）
+        """
+        graph = self._ctx.novel.story_graph if self._ctx.novel else None
+        if not graph or not fragments:
+            return
+
+        # 拼接章节文本
+        chapter_text = "\n".join(
+            (f"{f.character}: " if f.character else "") + f.text
+            for f in fragments
+        )
+        if not chapter_text.strip():
+            return
+
+        # 记录更新前状态
+        old_names = {p.name for p in self._kg.get_all_persons(graph)}
+        before_persons = len(old_names)
+        before_events = len(graph.event_nodes)
+
+        try:
+            updated = self._kg.update_with_chapter(graph, chapter_text, ch_num)
+            self._ctx.novel.story_graph = updated
+
+            after_persons = len(self._kg.get_all_persons(updated))
+            after_events = len(updated.event_nodes)
+            new_chars = after_persons - before_persons
+            new_events = after_events - before_events
+
+            if new_chars or new_events:
+                print(f"  [KG] 新章节更新: +{new_chars} 角色, +{new_events} 事件")
+
+                # 找出新增的角色
+                new_persons = [p for p in self._kg.get_all_persons(updated)
+                              if p.name not in old_names]
+
+                for p in new_persons:
+                    # 同步新角色到 StoryMemory
+                    self._story_memory.update_character(
+                        p.name, status=p.status or "active",
+                        verified=False, role_type=p.role_type or "",
+                        importance=p.importance or 0,
+                        faction=p.faction or "",
+                    )
+                    print(f"  [KG] 新角色「{p.name}」已同步到 StoryMemory")
+
+                    # 蒸馏新角色的 CharacterProfile（Voice/Boundary/State）
+                    if p.importance >= 5 and self._novel_text:
+                        try:
+                            from ..distillers.character_distiller import CharacterDistiller
+                            distiller = CharacterDistiller(self._llm, self._kg)
+                            profile = distiller.distill_character(
+                                p.name, self._novel_text + "\n" + chapter_text, updated,
+                            )
+                            self._character_profiles[p.name] = profile
+                            print(f"  [Distill] 新角色「{p.name}」Profile 蒸馏完成")
+                            if project_dir:
+                                self._save_cached_char_profiles(
+                                    project_dir, self._character_profiles,
+                                )
+                        except Exception as e:
+                            print(f"  [Distill] 新角色「{p.name}」蒸馏失败（非致命）: {e}")
+
+            # 持久化更新后的 KG
+            if project_dir:
+                self._services.project.save_novel(self._ctx.novel)
+        except Exception as e:
+            print(f"  [KG] 新章节更新失败（非致命）: {e}")
 
     # ================================================================
     # Agent 输出解析

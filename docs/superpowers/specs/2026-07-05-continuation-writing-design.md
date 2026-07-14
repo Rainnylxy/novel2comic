@@ -14,16 +14,16 @@
 
 ## 2. 核心需求
 
-| 编号 | 需求 | 优先级 |
-|------|------|--------|
-| R1 | AI 自主续写，从小说最后一章结尾开始 | P0 |
-| R2 | 流式输出，逐 fragment 推送至前端（SSE） | P0 |
-| R3 | 用户可随时输入自然语言指令调整方向 | P0 |
-| R4 | 前端以"聊天小说"形式展示（对话气泡 + 旁白卡片） | P0 |
-| R5 | 多 Agent 协作（大纲 → 写作 → 审校 → 修订） | P1 |
-| R6 | 作者文风蒸馏 + 注入 Writer，保证风格一致 | P1 |
-| R7 | 基于 KG 的一致性校验，防止角色 OOC / 时间线冲突 | P1 |
-| R8 | 续写完成后更新 KG（新事件、新关系） | P2 |
+| 编号 | 需求                                            | 优先级 |
+| ---- | ----------------------------------------------- | ------ |
+| R1   | AI 自主续写，从小说最后一章结尾开始             | P0     |
+| R2   | 流式输出，逐 fragment 推送至前端（SSE）         | P0     |
+| R3   | 用户可随时输入自然语言指令调整方向              | P0     |
+| R4   | 前端以"聊天小说"形式展示（对话气泡 + 旁白卡片） | P0     |
+| R5   | 多 Agent 协作（大纲 → 写作 → 审校 → 修订）      | P1     |
+| R6   | 作者文风蒸馏 + 注入 Writer，保证风格一致        | P1     |
+| R7   | 基于 KG 的一致性校验，防止角色 OOC / 时间线冲突 | P1     |
+| R8   | 续写完成后更新 KG（新事件、新关系）             | P2     |
 
 ---
 
@@ -42,20 +42,20 @@
 
 ## 4. 复用清单
 
-| 现有模块 | 续写系统中的用法 |
-|----------|-----------------|
-| `src/knowledge_graph.py` | 所有 Agent 查询角色/事件/关系/伏笔 |
-| `src/chapter_parser.py` | 加载小说章节 |
-| `src/models.py` | Novel, StoryGraph, Person 等数据模型 |
-| `src/llm.py` | UnifiedLLM（Writer 额外走原生 streaming API） |
-| `src/character_distiller.py` | Voice/Boundary/Policy Anchors → Writer 角色行为约束 |
-| `src/context.py` | GlobalContext + ServiceRegistry |
-| `src/services/kg_service.py` | KG 查询服务 |
-| `src/services/project_service.py` | 项目存储/加载 |
-| `src/agent_memory.py` | Agent 记忆系统 |
-| `src/agents/base_agent.py` | Agent 基类（Plot Architect / Reviewer / Editor 继承） |
-| `src/scene_engine.py` | 场景上下文构建 |
-| `src/server/session_manager.py` | 参考其 session 管理模式 |
+| 现有模块                          | 续写系统中的用法                                      |
+| --------------------------------- | ----------------------------------------------------- |
+| `src/knowledge_graph.py`          | 所有 Agent 查询角色/事件/关系/伏笔                    |
+| `src/chapter_parser.py`           | 加载小说章节                                          |
+| `src/models.py`                   | Novel, StoryGraph, Person 等数据模型                  |
+| `src/llm.py`                      | UnifiedLLM（Writer 额外走原生 streaming API）         |
+| `src/character_distiller.py`      | Voice/Boundary/Policy Anchors → Writer 角色行为约束   |
+| `src/context.py`                  | GlobalContext + ServiceRegistry                       |
+| `src/services/kg_service.py`      | KG 查询服务                                           |
+| `src/services/project_service.py` | 项目存储/加载                                         |
+| `src/agent_memory.py`             | Agent 记忆系统                                        |
+| `src/agents/base_agent.py`        | Agent 基类（Plot Architect / Reviewer / Editor 继承） |
+| `src/scene_engine.py`             | 场景上下文构建                                        |
+| `src/server/session_manager.py`   | 参考其 session 管理模式                               |
 
 ---
 
@@ -220,12 +220,12 @@ class StoryFragment:
     text: str
     character: Optional[str] = None   # dialogue / action / inner_thought 时必填
     divider_label: Optional[str] = None  # divider 时可选（如 "三小时后"）
-    
+
     def to_sse(self) -> str:
         """序列化为 SSE 事件。"""
         import json
         return json.dumps(self.to_dict(), ensure_ascii=False)
-    
+
     def to_dict(self) -> dict:
         d = {"type": self.type, "text": self.text}
         if self.character:
@@ -237,13 +237,13 @@ class StoryFragment:
 
 **前端渲染映射**:
 
-| type | 展示 |
-|------|------|
-| `dialogue` | 角色头像 + 聊天气泡 |
-| `narration` | 居中灰色文字卡片 |
-| `action` | 小字附加在角色名下 |
+| type            | 展示                     |
+| --------------- | ------------------------ |
+| `dialogue`      | 角色头像 + 聊天气泡      |
+| `narration`     | 居中灰色文字卡片         |
+| `action`        | 小字附加在角色名下       |
 | `inner_thought` | 虚线边框气泡（区分对话） |
-| `divider` | 水平分割线 + 可选标签 |
+| `divider`       | 水平分割线 + 可选标签    |
 
 ---
 
@@ -254,6 +254,7 @@ class StoryFragment:
 **继承**: `BaseAgent`（`SKILL_NAME = "plot_architect"`）
 
 **输入**:
+
 - 上一章原文结尾（~3000 字）
 - KG 上下文：角色状态、未解决伏笔（因果链）、活跃冲突
 - 用户初始指令（可选）
@@ -261,19 +262,21 @@ class StoryFragment:
 - 角色 Profile（Voice/Boundary）
 
 **工具**:
+
 - `analyze_hanging_threads()` — 从 KG 因果链中提取未解决伏笔
 - `sketch_character_beats()` — 为每个主要角色规划本章情绪/行为节拍
 - `plan_structure()` — 生成章节结构（起承转合 + 悬念钩子）
 
 **输出**:
+
 ```json
 {
   "chapter_number": 135,
   "title": "暗流",
   "synopsis": "江停在旧案卷宗中发现了一个被忽略的细节...",
   "character_beats": {
-    "江停": {"arc": "从犹豫到决断", "key_action": "独自前往废弃仓库"},
-    "严峫": {"arc": "察觉异常→追踪", "key_action": "发现江停留下的线索"}
+    "江停": { "arc": "从犹豫到决断", "key_action": "独自前往废弃仓库" },
+    "严峫": { "arc": "察觉异常→追踪", "key_action": "发现江停留下的线索" }
   },
   "structure": {
     "opening": "场景锚定——刑侦支队深夜加班",
@@ -295,6 +298,7 @@ class StoryFragment:
 **职责**: 根据大纲生成章节内容，以 StoryFragment 为单位逐条流式输出。这是唯一不走 AgentFlow ReAct 循环的组件，直接调用 LLM 原生 streaming API。
 
 **输入**:
+
 - ① 的大纲
 - KG 角色档案（Voice / Boundary / Policy Anchors）
 - AuthorStyleProfile + Exemplars
@@ -338,17 +342,18 @@ class StoryFragment:
 ```
 
 **流式控制**:
+
 ```
 Writer 持有:
   - _stream: AsyncGenerator      ← LLM streaming 响应
   - _generated_fragments: list   ← 已生成但未 flush 的 fragments
   - _inject_signal: asyncio.Event ← 注入指令触发
-  
+
 run():
   1. 构建 prompt → 调用 LLM chat completions (stream=true)
   2. 逐行读取 → 解析 JSON → yield StoryFragment
   3. 每个 fragment 通过 SSE 推送到前端
-  4. 收到 inject_signal → 
+  4. 收到 inject_signal →
      a. abort 当前 LLM stream (close HTTP connection)
      b. 将指令 + 已生成文本注入 context
      c. 重新发起 streaming 请求（continue 模式）
@@ -367,6 +372,7 @@ run():
 **继承**: `BaseAgent`（`SKILL_NAME = "consistency_reviewer"`）
 
 **检查维度**:
+
 1. **角色 OOC**: 对话是否符合 Voice / Boundary
 2. **状态一致性**: 角色生死/位置与 KG 是否一致
 3. **时间线**: 事件顺序是否与已有事件冲突
@@ -375,12 +381,14 @@ run():
 6. **风格一致性**: 是否偏离 AuthorStyleProfile（语气、节奏）
 
 **工具**:
+
 - `check_character_consistency(draft)` — 角色 OOC 检查
 - `check_timeline(draft)` — 时间线校验
 - `check_setting_consistency(draft)` — 设定矛盾检查
 - `check_style_consistency(draft)` — 风格一致性检查
 
 **输出**:
+
 ```json
 {
   "issues": [
@@ -406,6 +414,7 @@ run():
 **继承**: `BaseAgent`（`SKILL_NAME = "revision_editor"`）
 
 **原则**:
+
 - 只修改有问题的 fragment，不重写整章
 - 修订后保持叙事流畅
 - 输出修订记录
@@ -413,6 +422,7 @@ run():
 **输入**: ②的完整草稿（fragment 列表）+ ③的问题列表
 
 **输出**:
+
 ```json
 {
   "revised_fragments": [...],
@@ -436,25 +446,25 @@ class ContinuationPipeline:
         self.reviewer = ConsistencyReviewer(ctx, services, llm)
         self.editor = RevisionEditor(ctx, services, llm)
         self._inject_queue = asyncio.Queue()  # 用户注入的指令
-    
+
     async def run(self, instruction: str = "") -> AsyncGenerator[PipelineEvent, None]:
         # 1. Plot Architect 生成大纲
         yield PipelineEvent("phase", "planning")
         outline = await self.architect.run(instruction)
         yield PipelineEvent("outline", outline)
-        
+
         # 2. Chapter Writer 流式生成
         yield PipelineEvent("phase", "writing")
         draft = []
         async for fragment in self.writer.stream(outline):
             draft.append(fragment)
             yield PipelineEvent("fragment", fragment)
-        
+
         # 3. Consistency Reviewer 异步审校（不阻塞 yield）
         yield PipelineEvent("phase", "reviewing")
         issues = await self.reviewer.run(draft)
         yield PipelineEvent("review", issues)
-        
+
         # 4. Revision Editor 修订
         if issues["issues"]:
             yield PipelineEvent("phase", "revising")
@@ -462,7 +472,7 @@ class ContinuationPipeline:
             yield PipelineEvent("complete", revised)
         else:
             yield PipelineEvent("complete", {"fragments": draft})
-    
+
     async def inject(self, instruction: str):
         """接收用户注入指令。"""
         await self.writer.inject(instruction)
@@ -593,6 +603,7 @@ event: done
 ## 10. 文件变更清单
 
 ### 新增
+
 - `src/continuation/__init__.py`
 - `src/continuation/author_style_distiller.py`
 - `src/continuation/author_style_profile.py`
@@ -609,6 +620,7 @@ event: done
 - （Chapter Writer 不走 AgentFlow，不需要 skill 文件）
 
 ### 修改
+
 - `src/server/__init__.py` — 注册新 handler
 - `src/server/handlers.py` — 可保留（roleplay API 不受影响）
 - `src/cli/cli.py` — 新增 `write` 子命令
@@ -616,9 +628,11 @@ event: done
 - `main.py` — 可选：添加 `write` 入口
 
 ### 移除
+
 - `skills/continuation.md` — 旧版单 Agent 续写 skill，被新多 Agent 体系替代
 
 ### 不变
+
 - `src/knowledge_graph.py`
 - `src/chapter_parser.py`
 - `src/models.py`
@@ -633,13 +647,13 @@ event: done
 
 ## 11. 测试策略
 
-| 层级 | 测试内容 | 方式 |
-|------|---------|------|
-| 单元测试 | Fragment 序列化/反序列化 | pytest |
-| 单元测试 | AuthorStyleDistiller 统计分析 | pytest |
-| 单元测试 | Pipeline 编排逻辑 (mock LLM) | pytest + asyncio |
-| 集成测试 | Chapter Writer + streaming 输出 | 手动 + 录屏 |
-| 集成测试 | Inject 中断 → 恢复流 | 手动 |
-| 集成测试 | 完整流水线: 大纲 → 写作 → 审校 → 修订 | 手动 |
-| E2E | 前端 SSE 渲染 + inject 交互 | 手动 |
-| 回归测试 | roleplay 模式仍可正常启动 | pytest |
+| 层级     | 测试内容                              | 方式             |
+| -------- | ------------------------------------- | ---------------- |
+| 单元测试 | Fragment 序列化/反序列化              | pytest           |
+| 单元测试 | AuthorStyleDistiller 统计分析         | pytest           |
+| 单元测试 | Pipeline 编排逻辑 (mock LLM)          | pytest + asyncio |
+| 集成测试 | Chapter Writer + streaming 输出       | 手动 + 录屏      |
+| 集成测试 | Inject 中断 → 恢复流                  | 手动             |
+| 集成测试 | 完整流水线: 大纲 → 写作 → 审校 → 修订 | 手动             |
+| E2E      | 前端 SSE 渲染 + inject 交互           | 手动             |
+| 回归测试 | roleplay 模式仍可正常启动             | pytest           |

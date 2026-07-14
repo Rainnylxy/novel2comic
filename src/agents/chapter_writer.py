@@ -185,9 +185,10 @@ class ChapterWriter(BaseAgent):
                 person = (graph.get_person_node(name)
                           if hasattr(graph, 'get_person_node') else None)
                 if person:
-                    lines.append(f"身份: {person.role_type} | 派系: {person.faction}")
+                    lines.append(f"叙事角色: {person.role_type} | 所属: {person.faction}")
+                    # description 含关键职业/身份信息，优先展示
                     if person.description:
-                        lines.append(f"简介: {person.description}")
+                        lines.append(f"身份: {person.description}")
                     # Dossier
                     if person.ending:
                         lines.append(f"结局: {person.ending}")

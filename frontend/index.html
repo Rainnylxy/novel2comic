@@ -1,794 +1,846 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>续写引擎</title>
-<style>
-  :root {
-    --bg: #0d1117;
-    --bg-panel: #161b22;
-    --bg-input: #21262d;
-    --border: #30363d;
-    --text: #c9d1d9;
-    --text-dim: #8b949e;
-    --accent: #d4a853;
-    --accent-glow: #f0c060;
-    --blue: #58a6ff;
-    --purple: #bc8cff;
-    --green: #3fb950;
-    --danger: #f85149;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: Georgia, 'Noto Serif SC', 'Source Han Serif SC', serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    line-height: 1.7;
-  }
-
-  /* ===== 启动画面 ===== */
-  #start-screen {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    padding: 2rem;
-  }
-  #start-screen h1 {
-    font-size: 2.5rem;
-    color: var(--accent);
-    margin-bottom: 0.5rem;
-    text-shadow: 0 0 20px rgba(212, 168, 83, 0.3);
-  }
-  #start-screen .subtitle {
-    color: var(--text-dim);
-    margin-bottom: 2rem;
-  }
-  #start-form {
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 2rem;
-    width: 100%;
-    max-width: 480px;
-  }
-  #start-form label {
-    display: block;
-    color: var(--text-dim);
-    font-size: 0.85rem;
-    margin: 1rem 0 0.3rem;
-  }
-  #start-form input,
-  #start-form textarea {
-    width: 100%;
-    padding: 0.6rem 0.8rem;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 1rem;
-    resize: vertical;
-  }
-  #start-form input:focus,
-  #start-form textarea:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  #start-form button {
-    width: 100%;
-    margin-top: 1.5rem;
-    padding: 0.8rem;
-    background: var(--accent);
-    color: #0d1117;
-    border: none;
-    border-radius: 8px;
-    font-size: 1.1rem;
-    font-family: inherit;
-    font-weight: bold;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  #start-form button:hover {
-    background: var(--accent-glow);
-  }
-  #start-form button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* ===== 阅读视图 ===== */
-  #reader-screen {
-    display: none;
-    flex-direction: column;
-    height: 100vh;
-  }
-
-  /* 顶部栏 */
-  #top-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.6rem 1.2rem;
-    background: var(--bg-panel);
-    border-bottom: 1px solid var(--border);
-    position: sticky;
-    top: 0;
-    z-index: 10;
-  }
-  #top-bar .title {
-    font-size: 1.1rem;
-    font-weight: bold;
-    color: var(--accent);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  #top-bar .status {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    white-space: nowrap;
-    margin-left: 1rem;
-  }
-  #top-bar .status.active {
-    color: var(--green);
-  }
-  #top-bar .status.error {
-    color: var(--danger);
-  }
-
-  /* Fragment 容器 */
-  #fragment-container {
-    flex: 1;
-    overflow-y: auto;
-    padding: 1.5rem;
-    max-width: 700px;
-    margin: 0 auto;
-    width: 100%;
-    scroll-behavior: smooth;
-  }
-  #fragment-container::-webkit-scrollbar {
-    width: 6px;
-  }
-  #fragment-container::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
-  }
-
-  /* 底部输入栏 */
-  #bottom-bar {
-    padding: 0.8rem 1.2rem;
-    background: var(--bg-panel);
-    border-top: 1px solid var(--border);
-    display: flex;
-    gap: 0.8rem;
-  }
-  #inject-input {
-    flex: 1;
-    padding: 0.6rem 0.8rem;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.95rem;
-  }
-  #inject-input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  #inject-btn {
-    padding: 0.6rem 1.2rem;
-    background: var(--blue);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-family: inherit;
-    font-weight: bold;
-    transition: opacity 0.2s;
-  }
-  #inject-btn:hover {
-    opacity: 0.85;
-  }
-  #inject-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  /* ===== Fragment 样式 ===== */
-
-  /* 1. 叙述（旁白）：居中灰色斜体 */
-  .frag-narration {
-    text-align: center;
-    color: var(--text-dim);
-    font-style: italic;
-    margin: 1rem 0;
-    padding: 0.5rem 1rem;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    font-size: 0.95rem;
-  }
-
-  /* 2. 分隔线 */
-  .frag-divider {
-    text-align: center;
-    margin: 1.5rem 0;
-    color: var(--text-dim);
-    font-size: 0.85rem;
-  }
-  .frag-divider::before,
-  .frag-divider::after {
-    content: ' ──── ';
-    color: var(--border);
-  }
-
-  /* 3-5. 对话块（dialogue / action / inner_thought 共用容器） */
-  .frag-dialogue-block {
-    margin: 1rem 0;
-  }
-  .frag-dialogue-block.right {
-    text-align: right;
-  }
-  .frag-dialogue-block.left {
-    text-align: left;
-  }
-
-  /* 角色名标签 */
-  .frag-character-label {
-    font-size: 0.8rem;
-    color: var(--blue);
-    margin-bottom: 0.2rem;
-    font-weight: bold;
-  }
-  .frag-dialogue-block.right .frag-character-label {
-    color: var(--purple);
-  }
-
-  /* 3. 对话气泡 */
-  .frag-dialogue-bubble {
-    display: inline-block;
-    max-width: 80%;
-    padding: 0.5rem 1rem;
-    border-radius: 12px;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    font-size: 1rem;
-    text-align: left;
-  }
-  .frag-dialogue-block.right .frag-dialogue-bubble {
-    background: #1a2332;
-    border-color: var(--purple);
-  }
-
-  /* 4. 内心独白（虚线边框） */
-  .frag-inner-thought {
-    display: inline-block;
-    max-width: 80%;
-    padding: 0.5rem 1rem;
-    border-radius: 12px;
-    border: 1.5px dashed var(--border);
-    background: transparent;
-    font-style: italic;
-    color: var(--text-dim);
-    font-size: 0.95rem;
-    text-align: left;
-  }
-  .frag-dialogue-block.right .frag-inner-thought {
-    border-color: var(--purple);
-  }
-
-  /* 5. 动作描述 */
-  .frag-action {
-    font-size: 0.8rem;
-    color: var(--text-dim);
-    margin-top: 0.15rem;
-  }
-  .frag-action::before {
-    content: '( ';
-  }
-  .frag-action::after {
-    content: ' )';
-  }
-
-  /* 打字机光标动画 */
-  .frag-typing::after {
-    content: ' ▌';
-    animation: blink-cursor 1s step-end infinite;
-    color: var(--accent);
-  }
-  @keyframes blink-cursor {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
-  }
-
-  /* 入场动画 */
-  @keyframes frag-fade-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .frag-narration,
-  .frag-divider,
-  .frag-dialogue-block {
-    animation: frag-fade-in 0.3s ease;
-  }
-</style>
-</head>
-<body>
-
-<!-- ==================== 启动画面 ==================== -->
-<div id="start-screen">
-  <h1>续写引擎</h1>
-  <p class="subtitle">AI 自主续写 · 聊天小说阅读体验</p>
-  <form id="start-form">
-    <label>小说路径</label>
-    <input id="novel-path" type="text" value="novels/poyun.txt"
-           placeholder="如: novels/poyun.txt" required>
-    <label>初始指令（可选）</label>
-    <textarea id="initial-instruction" rows="2"
-              placeholder="如: 让江停更主动一些"></textarea>
-    <button type="submit" id="start-btn">开始续写</button>
-  </form>
-</div>
-
-<!-- ==================== 阅读画面 ==================== -->
-<div id="reader-screen">
-  <!-- 顶部栏 -->
-  <div id="top-bar">
-    <span class="title" id="reader-title">续写中...</span>
-    <span class="status" id="status-label">就绪</span>
-  </div>
-
-  <!-- fragment 流 -->
-  <div id="fragment-container">
-    <div id="fragment-placeholder" style="text-align:center;color:var(--text-dim);margin-top:2rem;">
-      正在连接服务器...
-    </div>
-  </div>
-
-  <!-- 底部指令栏 -->
-  <div id="bottom-bar">
-    <input id="inject-input" type="text"
-           placeholder="输入指令调整续写方向..."
-           autocomplete="off">
-    <button id="inject-btn" disabled>发送</button>
-    <button id="stop-btn" style="display:none">停止 ⏹</button>
-  </div>
-</div>
-
-<script>
-  // API 基础地址 —— 由 run_frontend 启动时动态注入
-  var API_BASE = window.API_BASE || 'http://localhost:8000';
-(function () {
-  'use strict';
-
-  // ============================================================
-  // 状态
-  // ============================================================
-  let abortController = null;
-  let readerRef = null;
-  let fragmentCount = 0;
-
-  // DOM 引用
-  const $ = function (id) { return document.getElementById(id); };
-  const startScreen    = $('start-screen');
-  const readerScreen   = $('reader-screen');
-  const readerTitle    = $('reader-title');
-  const statusLabel    = $('status-label');
-  const fragContainer  = $('fragment-container');
-  const injectInput    = $('inject-input');
-  const injectBtn      = $('inject-btn');
-  const stopBtn        = $('stop-btn');
-  const startForm      = $('start-form');
-  const startBtn       = $('start-btn');
-  const novelPathInput = $('novel-path');
-  const initInstrInput = $('initial-instruction');
-
-  // ============================================================
-  // 工具函数
-  // ============================================================
-  function escapeHtml(text) {
-    var d = document.createElement('div');
-    d.textContent = text;
-    return d.innerHTML;
-  }
-
-  function setStatus(text, className) {
-    statusLabel.textContent = text;
-    statusLabel.className = 'status' + (className ? ' ' + className : '');
-  }
-
-  function scrollToBottom() {
-    fragContainer.scrollTop = fragContainer.scrollHeight;
-  }
-
-  function removeTypingCursor() {
-    var el = fragContainer.querySelector('.frag-typing');
-    if (el) el.classList.remove('frag-typing');
-  }
-
-  // ============================================================
-  // Fragment 渲染
-  // ============================================================
-  function appendFragment(data) {
-    // 移除上一个 fragment 的打字机光标
-    removeTypingCursor();
-
-    var el;
-
-    switch (data.type) {
-      // ---- 叙述（旁白） ----
-      case 'narration':
-        el = document.createElement('div');
-        el.className = 'frag-narration frag-typing';
-        el.textContent = data.text;
-        break;
-
-      // ---- 分隔线 ----
-      case 'divider':
-        el = document.createElement('div');
-        el.className = 'frag-divider';
-        el.textContent = data.divider_label || '';
-        break;
-
-      // ---- 对话 / 内心独白 / 动作（共用对话块容器） ----
-      case 'dialogue':
-      case 'inner_thought':
-      case 'action':
-        el = document.createElement('div');
-        el.className = 'frag-dialogue-block frag-typing';
-
-        // 左右交替：偶数序号右，奇数序号左
-        el.classList.add(fragmentCount % 2 === 0 ? 'right' : 'left');
-
-        // 角色名标签（如果有）
-        if (data.character) {
-          var label = document.createElement('div');
-          label.className = 'frag-character-label';
-          label.textContent = data.character;
-          el.appendChild(label);
-        }
-
-        // 根据具体类型渲染内容
-        if (data.type === 'dialogue') {
-          var bubble = document.createElement('div');
-          bubble.className = 'frag-dialogue-bubble';
-          bubble.textContent = data.text;
-          el.appendChild(bubble);
-        } else if (data.type === 'inner_thought') {
-          var thought = document.createElement('div');
-          thought.className = 'frag-inner-thought';
-          thought.textContent = data.text;
-          el.appendChild(thought);
-        } else if (data.type === 'action') {
-          var action = document.createElement('div');
-          action.className = 'frag-action';
-          action.textContent = data.text;
-          el.appendChild(action);
-        }
-        break;
-
-      // ---- 未知类型 ----
-      default:
-        el = document.createElement('div');
-        el.className = 'frag-narration frag-typing';
-        el.textContent = data.text || '';
-        break;
-    }
-
-    fragContainer.appendChild(el);
-    fragmentCount++;
-    scrollToBottom();
-  }
-
-  // ============================================================
-  // SSE 事件处理
-  // ============================================================
-  function handleSSEEvent(eventType, data) {
-    switch (eventType) {
-      case 'phase':
-        var labels = {
-          planning:  '规划中...',
-          writing:   '写作中...',
-          reviewing: '审校中...',
-          revising:  '修订中...'
-        };
-        setStatus(labels[data.phase] || data.phase, 'active');
-        // 写作和审校阶段允许注入指令（下一章生效）
-        setStatus(data.phase === 'planning' ? '规划中...' :
-                  data.phase === 'writing' ? '写作中...' :
-                  data.phase === 'reviewing' ? '审校修订中...' : data.phase, 'active');
-        if (data.phase === 'writing' || data.phase === 'reviewing') {
-          injectBtn.disabled = false;
-          injectInput.disabled = false;
-          injectInput.placeholder = '💬 输入指令调整续写方向...';
-        }
-        break;
-
-      case 'outline':
-        // data 可能是 {chapters: [chapter]} 或直接是 chapter dict
-        var ch = (data.chapters && data.chapters[0]) || data;
-        var chNum = ch.chapter_number || '?';
-        var chTitle = ch.title || ('第' + chNum + '章');
-        readerTitle.textContent = chTitle + ' · 第' + chNum + '章';
-        appendFragment({
-          type: 'divider',
-          divider_label: '第' + chNum + '章「' + chTitle + '」'
-        });
-        break;
-
-      case 'fragment':
-        appendFragment(data);
-        break;
-
-      case 'review':
-        var issues = data.issues || [];
-        setStatus(
-          issues.length > 0
-            ? '审校: ' + issues.length + ' 个问题'
-            : '审校通过',
-          issues.length > 0 ? 'error' : 'active'
-        );
-        break;
-
-      case 'complete':
-        var chNum = data.chapter || '?';
-        var chTitle = data.title || '';
-        var chCount = data.chapter_count || 1;
-        setStatus('第' + chNum + '章「' + chTitle + '」完成 — 正在规划下一章...', 'active');
-        removeTypingCursor();
-        injectBtn.disabled = false;
-        injectInput.disabled = false;
-        // stopBtn stays visible for manual interruption
-        break;
-
-      case 'done':
-        var written = data.chapters_written || 0;
-        var reason = data.reason || '';
-        var msg = written + ' 章完成';
-        if (reason === 'roadmap_exhausted') msg = '全部 ' + written + ' 章完成，故事告一段落';
-        else if (reason === 'stop_requested') msg = '已停止 (' + written + ' 章)';
-        else if (reason === 'max_chapters') msg = '已达上限 (' + written + ' 章)';
-        setStatus(msg, '');
-        removeTypingCursor();
-        injectBtn.style.display = 'none';
-        injectInput.style.display = 'none';
-        stopBtn.style.display = 'none';
-        break;
-
-      case 'error':
-        setStatus('错误: ' + (data.message || '未知错误'), 'error');
-        removeTypingCursor();
-        break;
-
-      default:
-        break;
-    }
-  }
-
-  // ============================================================
-  // 启动续写
-  // ============================================================
-  async function startWriting(event) {
-    event.preventDefault();
-
-    var novelPath = novelPathInput.value.trim();
-    if (!novelPath) return;
-
-    var instruction = initInstrInput.value.trim();
-
-    // 切换到阅读视图
-    startScreen.style.display = 'none';
-    readerScreen.style.display = 'flex';
-    readerTitle.textContent = novelPath.split('/').pop();
-    setStatus('规划中...', 'active');
-    fragContainer.innerHTML = '';
-    injectBtn.style.display = 'inline-block';
-    injectInput.style.display = 'block';
-    injectBtn.disabled = true;
-    injectInput.disabled = true;
-    stopBtn.style.display = 'inline-block';
-    fragmentCount = 0;
-
-    await startStream(instruction);
-    return;
-
-    // dead code kept for safety
-    abortController = new AbortController();
-    try {
-      var resp = await fetch(API_BASE + '/api/write/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          novel_path: novelPath,
-          instruction: instruction
-        }),
-        signal: abortController.signal
-      });
-
-      if (!resp.ok) {
-        var errText = await resp.text().catch(function () { return resp.statusText; });
-        setStatus('连接失败 (' + resp.status + ')', 'error');
-        console.error('SSE connection error:', resp.status, errText);
-        return;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>续写引擎</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --bg-panel: #161b22;
+        --bg-input: #21262d;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --text-dim: #8b949e;
+        --accent: #d4a853;
+        --accent-glow: #f0c060;
+        --blue: #58a6ff;
+        --purple: #bc8cff;
+        --green: #3fb950;
+        --danger: #f85149;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: Georgia, "Noto Serif SC", "Source Han Serif SC", serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        line-height: 1.7;
       }
 
-      readerRef = resp.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = '';
-      var currentEvent = '';
+      /* ===== 启动画面 ===== */
+      #start-screen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 2rem;
+      }
+      #start-screen h1 {
+        font-size: 2.5rem;
+        color: var(--accent);
+        margin-bottom: 0.5rem;
+        text-shadow: 0 0 20px rgba(212, 168, 83, 0.3);
+      }
+      #start-screen .subtitle {
+        color: var(--text-dim);
+        margin-bottom: 2rem;
+      }
+      #start-form {
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 2rem;
+        width: 100%;
+        max-width: 480px;
+      }
+      #start-form label {
+        display: block;
+        color: var(--text-dim);
+        font-size: 0.85rem;
+        margin: 1rem 0 0.3rem;
+      }
+      #start-form input,
+      #start-form textarea {
+        width: 100%;
+        padding: 0.6rem 0.8rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-family: inherit;
+        font-size: 1rem;
+        resize: vertical;
+      }
+      #start-form input:focus,
+      #start-form textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      #start-form button {
+        width: 100%;
+        margin-top: 1.5rem;
+        padding: 0.8rem;
+        background: var(--accent);
+        color: #0d1117;
+        border: none;
+        border-radius: 8px;
+        font-size: 1.1rem;
+        font-family: inherit;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      #start-form button:hover {
+        background: var(--accent-glow);
+      }
+      #start-form button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
 
-      while (true) {
-        var result = await readerRef.read();
-        if (result.done) break;
+      /* ===== 阅读视图 ===== */
+      #reader-screen {
+        display: none;
+        flex-direction: column;
+        height: 100vh;
+      }
 
-        buffer += decoder.decode(result.value, { stream: true });
-        var lines = buffer.split('\n');
-        buffer = lines.pop() || '';  // 保留未完成的行
+      /* 顶部栏 */
+      #top-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.6rem 1.2rem;
+        background: var(--bg-panel);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      #top-bar .title {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: var(--accent);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #top-bar .status {
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        white-space: nowrap;
+        margin-left: 1rem;
+      }
+      #top-bar .status.active {
+        color: var(--green);
+      }
+      #top-bar .status.error {
+        color: var(--danger);
+      }
 
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i];
+      /* Fragment 容器 */
+      #fragment-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1.5rem;
+        max-width: 700px;
+        margin: 0 auto;
+        width: 100%;
+        scroll-behavior: smooth;
+      }
+      #fragment-container::-webkit-scrollbar {
+        width: 6px;
+      }
+      #fragment-container::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 3px;
+      }
 
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith('data: ')) {
-            try {
-              var data = JSON.parse(line.slice(6));
-              handleSSEEvent(currentEvent, data);
-            } catch (parseErr) {
-              console.error('SSE parse error:', parseErr, 'line:', line);
+      /* 底部输入栏 */
+      #bottom-bar {
+        padding: 0.8rem 1.2rem;
+        background: var(--bg-panel);
+        border-top: 1px solid var(--border);
+        display: flex;
+        gap: 0.8rem;
+      }
+      #inject-input {
+        flex: 1;
+        padding: 0.6rem 0.8rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.95rem;
+      }
+      #inject-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      #inject-btn {
+        padding: 0.6rem 1.2rem;
+        background: var(--blue);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-family: inherit;
+        font-weight: bold;
+        transition: opacity 0.2s;
+      }
+      #inject-btn:hover {
+        opacity: 0.85;
+      }
+      #inject-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      /* ===== Fragment 样式 ===== */
+
+      /* 1. 叙述（旁白）：居中灰色斜体 */
+      .frag-narration {
+        text-align: center;
+        color: var(--text-dim);
+        font-style: italic;
+        margin: 1rem 0;
+        padding: 0.5rem 1rem;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        font-size: 0.95rem;
+      }
+
+      /* 2. 分隔线 */
+      .frag-divider {
+        text-align: center;
+        margin: 1.5rem 0;
+        color: var(--text-dim);
+        font-size: 0.85rem;
+      }
+      .frag-divider::before,
+      .frag-divider::after {
+        content: " ──── ";
+        color: var(--border);
+      }
+
+      /* 3-5. 对话块（dialogue / action / inner_thought 共用容器） */
+      .frag-dialogue-block {
+        margin: 1rem 0;
+      }
+      .frag-dialogue-block.right {
+        text-align: right;
+      }
+      .frag-dialogue-block.left {
+        text-align: left;
+      }
+
+      /* 角色名标签 */
+      .frag-character-label {
+        font-size: 0.8rem;
+        color: var(--blue);
+        margin-bottom: 0.2rem;
+        font-weight: bold;
+      }
+      .frag-dialogue-block.right .frag-character-label {
+        color: var(--purple);
+      }
+
+      /* 3. 对话气泡 */
+      .frag-dialogue-bubble {
+        display: inline-block;
+        max-width: 80%;
+        padding: 0.5rem 1rem;
+        border-radius: 12px;
+        background: var(--bg-input);
+        border: 1px solid var(--border);
+        font-size: 1rem;
+        text-align: left;
+      }
+      .frag-dialogue-block.right .frag-dialogue-bubble {
+        background: #1a2332;
+        border-color: var(--purple);
+      }
+
+      /* 4. 内心独白（虚线边框） */
+      .frag-inner-thought {
+        display: inline-block;
+        max-width: 80%;
+        padding: 0.5rem 1rem;
+        border-radius: 12px;
+        border: 1.5px dashed var(--border);
+        background: transparent;
+        font-style: italic;
+        color: var(--text-dim);
+        font-size: 0.95rem;
+        text-align: left;
+      }
+      .frag-dialogue-block.right .frag-inner-thought {
+        border-color: var(--purple);
+      }
+
+      /* 5. 动作描述 */
+      .frag-action {
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        margin-top: 0.15rem;
+      }
+      .frag-action::before {
+        content: "( ";
+      }
+      .frag-action::after {
+        content: " )";
+      }
+
+      /* 打字机光标动画 */
+      .frag-typing::after {
+        content: " ▌";
+        animation: blink-cursor 1s step-end infinite;
+        color: var(--accent);
+      }
+      @keyframes blink-cursor {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0;
+        }
+      }
+
+      /* 入场动画 */
+      @keyframes frag-fade-in {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .frag-narration,
+      .frag-divider,
+      .frag-dialogue-block {
+        animation: frag-fade-in 0.3s ease;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ==================== 启动画面 ==================== -->
+    <div id="start-screen">
+      <h1>续写引擎</h1>
+      <p class="subtitle">AI 自主续写 · 聊天小说阅读体验</p>
+      <form id="start-form">
+        <label>小说路径</label>
+        <input
+          id="novel-path"
+          type="text"
+          value="novels/poyun.txt"
+          placeholder="如: novels/poyun.txt"
+          required
+        />
+        <label>初始指令（可选）</label>
+        <textarea
+          id="initial-instruction"
+          rows="2"
+          placeholder="如: 让江停更主动一些"
+        ></textarea>
+        <button type="submit" id="start-btn">开始续写</button>
+      </form>
+    </div>
+
+    <!-- ==================== 阅读画面 ==================== -->
+    <div id="reader-screen">
+      <!-- 顶部栏 -->
+      <div id="top-bar">
+        <span class="title" id="reader-title">续写中...</span>
+        <span class="status" id="status-label">就绪</span>
+      </div>
+
+      <!-- fragment 流 -->
+      <div id="fragment-container">
+        <div
+          id="fragment-placeholder"
+          style="text-align: center; color: var(--text-dim); margin-top: 2rem"
+        >
+          正在连接服务器...
+        </div>
+      </div>
+
+      <!-- 底部指令栏 -->
+      <div id="bottom-bar">
+        <input
+          id="inject-input"
+          type="text"
+          placeholder="输入指令调整续写方向..."
+          autocomplete="off"
+        />
+        <button id="inject-btn" disabled>发送</button>
+        <button id="stop-btn" style="display: none">停止 ⏹</button>
+      </div>
+    </div>
+
+    <script>
+      // API 基础地址 —— 由 run_frontend 启动时动态注入
+      var API_BASE = window.API_BASE || "http://localhost:8000";
+      (function () {
+        "use strict";
+
+        // ============================================================
+        // 状态
+        // ============================================================
+        let abortController = null;
+        let readerRef = null;
+        let fragmentCount = 0;
+
+        // DOM 引用
+        const $ = function (id) {
+          return document.getElementById(id);
+        };
+        const startScreen = $("start-screen");
+        const readerScreen = $("reader-screen");
+        const readerTitle = $("reader-title");
+        const statusLabel = $("status-label");
+        const fragContainer = $("fragment-container");
+        const injectInput = $("inject-input");
+        const injectBtn = $("inject-btn");
+        const stopBtn = $("stop-btn");
+        const startForm = $("start-form");
+        const startBtn = $("start-btn");
+        const novelPathInput = $("novel-path");
+        const initInstrInput = $("initial-instruction");
+
+        // ============================================================
+        // 工具函数
+        // ============================================================
+        function escapeHtml(text) {
+          var d = document.createElement("div");
+          d.textContent = text;
+          return d.innerHTML;
+        }
+
+        function setStatus(text, className) {
+          statusLabel.textContent = text;
+          statusLabel.className = "status" + (className ? " " + className : "");
+        }
+
+        function scrollToBottom() {
+          fragContainer.scrollTop = fragContainer.scrollHeight;
+        }
+
+        function removeTypingCursor() {
+          var el = fragContainer.querySelector(".frag-typing");
+          if (el) el.classList.remove("frag-typing");
+        }
+
+        // ============================================================
+        // Fragment 渲染
+        // ============================================================
+        function appendFragment(data) {
+          // 移除上一个 fragment 的打字机光标
+          removeTypingCursor();
+
+          var el;
+
+          switch (data.type) {
+            // ---- 叙述（旁白） ----
+            case "narration":
+              el = document.createElement("div");
+              el.className = "frag-narration frag-typing";
+              el.textContent = data.text;
+              break;
+
+            // ---- 分隔线 ----
+            case "divider":
+              el = document.createElement("div");
+              el.className = "frag-divider";
+              el.textContent = data.divider_label || "";
+              break;
+
+            // ---- 对话 / 内心独白 / 动作（共用对话块容器） ----
+            case "dialogue":
+            case "inner_thought":
+            case "action":
+              el = document.createElement("div");
+              el.className = "frag-dialogue-block frag-typing";
+
+              // 左右交替：偶数序号右，奇数序号左
+              el.classList.add(fragmentCount % 2 === 0 ? "right" : "left");
+
+              // 角色名标签（如果有）
+              if (data.character) {
+                var label = document.createElement("div");
+                label.className = "frag-character-label";
+                label.textContent = data.character;
+                el.appendChild(label);
+              }
+
+              // 根据具体类型渲染内容
+              if (data.type === "dialogue") {
+                var bubble = document.createElement("div");
+                bubble.className = "frag-dialogue-bubble";
+                bubble.textContent = data.text;
+                el.appendChild(bubble);
+              } else if (data.type === "inner_thought") {
+                var thought = document.createElement("div");
+                thought.className = "frag-inner-thought";
+                thought.textContent = data.text;
+                el.appendChild(thought);
+              } else if (data.type === "action") {
+                var action = document.createElement("div");
+                action.className = "frag-action";
+                action.textContent = data.text;
+                el.appendChild(action);
+              }
+              break;
+
+            // ---- 未知类型 ----
+            default:
+              el = document.createElement("div");
+              el.className = "frag-narration frag-typing";
+              el.textContent = data.text || "";
+              break;
+          }
+
+          fragContainer.appendChild(el);
+          fragmentCount++;
+          scrollToBottom();
+        }
+
+        // ============================================================
+        // SSE 事件处理
+        // ============================================================
+        function handleSSEEvent(eventType, data) {
+          switch (eventType) {
+            case "phase":
+              var labels = {
+                planning: "规划中...",
+                writing: "写作中...",
+                reviewing: "审校中...",
+                revising: "修订中...",
+              };
+              setStatus(labels[data.phase] || data.phase, "active");
+              // 写作和审校阶段允许注入指令（下一章生效）
+              setStatus(
+                data.phase === "planning"
+                  ? "规划中..."
+                  : data.phase === "writing"
+                    ? "写作中..."
+                    : data.phase === "reviewing"
+                      ? "审校修订中..."
+                      : data.phase,
+                "active",
+              );
+              if (data.phase === "writing" || data.phase === "reviewing") {
+                injectBtn.disabled = false;
+                injectInput.disabled = false;
+                injectInput.placeholder = "💬 输入指令调整续写方向...";
+              }
+              break;
+
+            case "outline":
+              // data 可能是 {chapters: [chapter]} 或直接是 chapter dict
+              var ch = (data.chapters && data.chapters[0]) || data;
+              var chNum = ch.chapter_number || "?";
+              var chTitle = ch.title || "第" + chNum + "章";
+              readerTitle.textContent = chTitle + " · 第" + chNum + "章";
+              appendFragment({
+                type: "divider",
+                divider_label: "第" + chNum + "章「" + chTitle + "」",
+              });
+              break;
+
+            case "fragment":
+              appendFragment(data);
+              break;
+
+            case "review":
+              var issues = data.issues || [];
+              setStatus(
+                issues.length > 0
+                  ? "审校: " + issues.length + " 个问题"
+                  : "审校通过",
+                issues.length > 0 ? "error" : "active",
+              );
+              break;
+
+            case "complete":
+              var chNum = data.chapter || "?";
+              var chTitle = data.title || "";
+              var chCount = data.chapter_count || 1;
+              setStatus(
+                "第" + chNum + "章「" + chTitle + "」完成 — 正在规划下一章...",
+                "active",
+              );
+              removeTypingCursor();
+              injectBtn.disabled = false;
+              injectInput.disabled = false;
+              // stopBtn stays visible for manual interruption
+              break;
+
+            case "done":
+              var written = data.chapters_written || 0;
+              var reason = data.reason || "";
+              var msg = written + " 章完成";
+              if (reason === "roadmap_exhausted")
+                msg = "全部 " + written + " 章完成，故事告一段落";
+              else if (reason === "stop_requested")
+                msg = "已停止 (" + written + " 章)";
+              else if (reason === "max_chapters")
+                msg = "已达上限 (" + written + " 章)";
+              setStatus(msg, "");
+              removeTypingCursor();
+              injectBtn.style.display = "none";
+              injectInput.style.display = "none";
+              stopBtn.style.display = "none";
+              break;
+
+            case "error":
+              setStatus("错误: " + (data.message || "未知错误"), "error");
+              removeTypingCursor();
+              break;
+
+            default:
+              break;
+          }
+        }
+
+        // ============================================================
+        // 启动续写
+        // ============================================================
+        async function startWriting(event) {
+          event.preventDefault();
+
+          var novelPath = novelPathInput.value.trim();
+          if (!novelPath) return;
+
+          var instruction = initInstrInput.value.trim();
+
+          // 切换到阅读视图
+          startScreen.style.display = "none";
+          readerScreen.style.display = "flex";
+          readerTitle.textContent = novelPath.split("/").pop();
+          setStatus("规划中...", "active");
+          fragContainer.innerHTML = "";
+          injectBtn.style.display = "inline-block";
+          injectInput.style.display = "block";
+          injectBtn.disabled = true;
+          injectInput.disabled = true;
+          stopBtn.style.display = "inline-block";
+          fragmentCount = 0;
+
+          await startStream(instruction);
+          return;
+
+          // dead code kept for safety
+          abortController = new AbortController();
+          try {
+            var resp = await fetch(API_BASE + "/api/write/start", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                novel_path: novelPath,
+                instruction: instruction,
+              }),
+              signal: abortController.signal,
+            });
+
+            if (!resp.ok) {
+              var errText = await resp.text().catch(function () {
+                return resp.statusText;
+              });
+              setStatus("连接失败 (" + resp.status + ")", "error");
+              console.error("SSE connection error:", resp.status, errText);
+              return;
+            }
+
+            readerRef = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = "";
+            var currentEvent = "";
+
+            while (true) {
+              var result = await readerRef.read();
+              if (result.done) break;
+
+              buffer += decoder.decode(result.value, { stream: true });
+              var lines = buffer.split("\n");
+              buffer = lines.pop() || ""; // 保留未完成的行
+
+              for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+
+                if (line.startsWith("event: ")) {
+                  currentEvent = line.slice(7).trim();
+                } else if (line.startsWith("data: ")) {
+                  try {
+                    var data = JSON.parse(line.slice(6));
+                    handleSSEEvent(currentEvent, data);
+                  } catch (parseErr) {
+                    console.error("SSE parse error:", parseErr, "line:", line);
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            if (err.name !== "AbortError") {
+              console.error("SSE error:", err);
+              setStatus("连接中断", "error");
+              removeTypingCursor();
             }
           }
         }
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        console.error('SSE error:', err);
-        setStatus('连接中断', 'error');
-        removeTypingCursor();
-      }
-    }
-  }
 
-  // ============================================================
-  // 注入指令
-  // ============================================================
-  async function injectInstruction() {
-    var instruction = injectInput.value.trim();
-    if (!instruction) return;
+        // ============================================================
+        // 注入指令
+        // ============================================================
+        async function injectInstruction() {
+          var instruction = injectInput.value.trim();
+          if (!instruction) return;
 
-    injectBtn.disabled = true;
-    injectInput.value = '';
-    setStatus('处理指令中...', 'active');
+          injectBtn.disabled = true;
+          injectInput.value = "";
+          setStatus("处理指令中...", "active");
 
-    try {
-      var resp = await fetch(API_BASE + '/api/write/inject', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instruction: instruction })
-      });
-      var result = await resp.json();
-      if (result.status !== 'ok') {
-        console.error('Inject failed:', result.error || result.status);
-        setStatus('指令发送失败', 'error');
-      } else {
-        setStatus('指令已发送 ✓ — 等待新的片段...', 'active');
-        // 不 disable — 写作阶段允许继续注入
-      }
-    } catch (err) {
-      console.error('Inject error:', err);
-      setStatus('指令发送失败: ' + err.message, 'error');
-    } finally {
-      injectBtn.disabled = false;
-      injectInput.disabled = false;
-      injectInput.focus();
-    }
-  }
-
-  // ============================================================
-  // 停止续写
-  // ============================================================
-  function stopWriting() {
-    setStatus('正在停止...', 'active');
-    if (abortController) {
-      abortController.abort();
-      abortController = null;
-    }
-    stopBtn.style.display = 'none';
-  }
-
-  async function startStream(instruction) {
-    instruction = instruction || '';
-    abortController = new AbortController();
-    try {
-      var resp = await fetch(API_BASE + '/api/write/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          novel_path: novelPathInput.value.trim(),
-          instruction: instruction
-        }),
-        signal: abortController.signal
-      });
-      readerRef = resp.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = '';
-
-      while (true) {
-        var chunk = await readerRef.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        var lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        var currentEvent = '';
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i];
-          if (line.indexOf('event: ') === 0) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.indexOf('data: ') === 0) {
-            try {
-              var data = JSON.parse(line.slice(6));
-              handleSSEEvent(currentEvent, data);
-            } catch (e) {}
+          try {
+            var resp = await fetch(API_BASE + "/api/write/inject", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ instruction: instruction }),
+            });
+            var result = await resp.json();
+            if (result.status !== "ok") {
+              console.error("Inject failed:", result.error || result.status);
+              setStatus("指令发送失败", "error");
+            } else {
+              setStatus("指令已发送 ✓ — 等待新的片段...", "active");
+              // 不 disable — 写作阶段允许继续注入
+            }
+          } catch (err) {
+            console.error("Inject error:", err);
+            setStatus("指令发送失败: " + err.message, "error");
+          } finally {
+            injectBtn.disabled = false;
+            injectInput.disabled = false;
+            injectInput.focus();
           }
         }
-      }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        setStatus('已停止', '');
-      } else {
-        setStatus('连接错误: ' + (err.message || err), 'error');
-      }
-      stopBtn.style.display = 'none';
-    }
-  }
 
-  // ============================================================
-  // 查询状态
-  // ============================================================
-  async function pollState() {
-    try {
-      var resp = await fetch(API_BASE + '/api/write/state');
-      if (!resp.ok) return;
-      var state = await resp.json();
-      if (state.phase) {
-        setStatus(state.phase, 'active');
-      }
-      if (state.chapter && readerTitle.textContent.indexOf('第' + state.chapter + '章') === -1) {
-        readerTitle.textContent = readerTitle.textContent.split('·')[0].trim() + ' · 第' + state.chapter + '章';
-      }
-    } catch (_) {
-      // 静默失败
-    }
-  }
+        // ============================================================
+        // 停止续写
+        // ============================================================
+        function stopWriting() {
+          setStatus("正在停止...", "active");
+          if (abortController) {
+            abortController.abort();
+            abortController = null;
+          }
+          stopBtn.style.display = "none";
+        }
 
-  // ============================================================
-  // 事件绑定
-  // ============================================================
+        async function startStream(instruction) {
+          instruction = instruction || "";
+          abortController = new AbortController();
+          try {
+            var resp = await fetch(API_BASE + "/api/write/start", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                novel_path: novelPathInput.value.trim(),
+                instruction: instruction,
+              }),
+              signal: abortController.signal,
+            });
+            readerRef = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = "";
 
-  // 启动表单
-  startForm.addEventListener('submit', startWriting);
+            while (true) {
+              var chunk = await readerRef.read();
+              if (chunk.done) break;
+              buffer += decoder.decode(chunk.value, { stream: true });
+              var lines = buffer.split("\n");
+              buffer = lines.pop() || "";
+              var currentEvent = "";
+              for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                if (line.indexOf("event: ") === 0) {
+                  currentEvent = line.slice(7).trim();
+                } else if (line.indexOf("data: ") === 0) {
+                  try {
+                    var data = JSON.parse(line.slice(6));
+                    handleSSEEvent(currentEvent, data);
+                  } catch (e) {}
+                }
+              }
+            }
+          } catch (err) {
+            if (err.name === "AbortError") {
+              setStatus("已停止", "");
+            } else {
+              setStatus("连接错误: " + (err.message || err), "error");
+            }
+            stopBtn.style.display = "none";
+          }
+        }
 
-  // 注入指令——按钮点击
-  injectBtn.addEventListener('click', injectInstruction);
+        // ============================================================
+        // 查询状态
+        // ============================================================
+        async function pollState() {
+          try {
+            var resp = await fetch(API_BASE + "/api/write/state");
+            if (!resp.ok) return;
+            var state = await resp.json();
+            if (state.phase) {
+              setStatus(state.phase, "active");
+            }
+            if (
+              state.chapter &&
+              readerTitle.textContent.indexOf("第" + state.chapter + "章") ===
+                -1
+            ) {
+              readerTitle.textContent =
+                readerTitle.textContent.split("·")[0].trim() +
+                " · 第" +
+                state.chapter +
+                "章";
+            }
+          } catch (_) {
+            // 静默失败
+          }
+        }
 
-  // 注入指令——回车键
-  injectInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      injectInstruction();
-    }
-  });
+        // ============================================================
+        // 事件绑定
+        // ============================================================
 
-  // 下一章按钮
-  stopBtn.addEventListener('click', stopWriting);
-  // 定期轮询状态（每 15 秒）
-  setInterval(pollState, 15000);
+        // 启动表单
+        startForm.addEventListener("submit", startWriting);
 
-})();
-</script>
-</body>
+        // 注入指令——按钮点击
+        injectBtn.addEventListener("click", injectInstruction);
+
+        // 注入指令——回车键
+        injectInput.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            injectInstruction();
+          }
+        });
+
+        // 下一章按钮
+        stopBtn.addEventListener("click", stopWriting);
+        // 定期轮询状态（每 15 秒）
+        setInterval(pollState, 15000);
+      })();
+    </script>
+  </body>
 </html>

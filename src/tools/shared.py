@@ -99,11 +99,15 @@ class SharedToolKit:
         lines = [
             f"角色: {name}",
             f"状态: {char_statuses.get(name, person.status)}",
-            f"身份: {person.role_type}",
+            f"叙事角色: {person.role_type}",
             f"重要性: {person.importance}",
-            f"派系: {person.faction}",
-            f"简介: {person.description or '无'}",
+            f"所属: {person.faction}" if person.faction else "",
         ]
+        # description 含有关键的职业/身份信息，独立并优先展示
+        if person.description:
+            lines.append(f"身份: {person.description}")
+        else:
+            lines.append("身份: 无")
 
         # 最后参与的事件
         if hasattr(graph, 'character_events'):

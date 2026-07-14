@@ -5,6 +5,7 @@
 ## 功能概述
 
 输入一本小说（.txt），Agent 自动完成：
+
 1. 解析章节（支持"第X章"/Chapter X/数字顿号等格式）
 2. 提取故事知识图谱（人物/事件/地点/组织/物品 + 9种关系边）
 3. 生成漫画分镜脚本 + SD 生图 prompt + 排版输出
@@ -184,28 +185,29 @@ select_chapter(3)
 
 基于 NetworkX MultiDiGraph 的异构知识图谱：
 
-| 节点类型 | key 格式 | 示例 |
-|----------|----------|------|
-| person | `person:苏墨` | role_type, faction, importance, status |
-| event | `event:三年之约` | event_type, chapter_start/end, cause, effect |
-| location | `location:长安城` | location_type, parent, factions |
-| org | `org:将军府` | org_type, leader, members, status |
-| item | `item:锈剑` | item_type, grade, owner_history |
-| chapter | `chapter:3` | index, title, summary |
+| 节点类型 | key 格式          | 示例                                         |
+| -------- | ----------------- | -------------------------------------------- |
+| person   | `person:苏墨`     | role_type, faction, importance, status       |
+| event    | `event:三年之约`  | event_type, chapter_start/end, cause, effect |
+| location | `location:长安城` | location_type, parent, factions              |
+| org      | `org:将军府`      | org_type, leader, members, status            |
+| item     | `item:锈剑`       | item_type, grade, owner_history              |
+| chapter  | `chapter:3`       | index, title, summary                        |
 
-| 边类型 | 连接 |
-|--------|------|
-| relationship | person ↔ person |
-| participates | person → event |
-| located_at | event → location |
-| belongs_to | person → org |
-| owns | person → item |
-| event_relation | event → event (causes/before/after) |
-| location_hierarchy | location → location (child/parent) |
+| 边类型             | 连接                                |
+| ------------------ | ----------------------------------- |
+| relationship       | person ↔ person                     |
+| participates       | person → event                      |
+| located_at         | event → location                    |
+| belongs_to         | person → org                        |
+| owns               | person → item                       |
+| event_relation     | event → event (causes/before/after) |
+| location_hierarchy | location → location (child/parent)  |
 
 ## Agent 通信协议
 
 所有 Tool 返回 JSON，格式统一：
+
 ```json
 {"status": "ok", "message": "人类可读摘要", "...": "具体数据"}
 {"error": "错误描述"}
@@ -216,17 +218,20 @@ Agent 通过 AgentFlow 的 `OpenAIClient` 对外通信，Tool 内部通过 `_ctx
 ## 已知限制 & 后续开发方向
 
 ### 确定要做
+
 - [ ] **Manga 格阵排版**: 当前只有条漫竖拼模式，日式漫画的多格排版未实现
 - [ ] **角色定妆照生成**: `design_characters` 只生成文本描述和触发词，未生成 reference image
 - [ ] **反馈记忆系统**: 设计文档 Section 7 已规划，三层记忆（项目/用户/风格）未实现
 - [ ] **Graph 算法仪表盘**: 中心度/最短路径/阵营分析已有 API，缺少可视化
 
 ### 待讨论
+
 - [ ] **Web UI**: 图片预览 + 并排对比 + 分镜编辑
 - [ ] **采样策略可配置**: 当前硬编码采样 10 章、每章 1500 字
 - [ ] **LLM Provider 热切换**: 当前需要重启改环境变量
 
 ### 已知坑
+
 - **StoryGraph 未持久化**: `extract_graph_from_text` 返回的图谱写入了 novel.json，但 `select_chapter` 增量更新后未立即保存（只在调用 `save_project` 时存）
 - **Windows GBK 终端**: emoji 打印会乱码，已全部替换为 `[OK]` 等 ASCII 标签
 - **Python 3.9**: 不支持 `X | None` 类型语法，必须用 `Optional[X]`
@@ -239,6 +244,7 @@ PYTHONPATH=/path/to/AgentFlow python tests/test_pipeline.py
 ```
 
 9 个测试全覆盖：
+
 - `test_style_detection` — 风格自动判断
 - `test_agent_tools_end_to_end` — 7 个 Pipeline Tool 端到端（Mock LLM）
 - `test_data_serialization` — JSON 序列化往返

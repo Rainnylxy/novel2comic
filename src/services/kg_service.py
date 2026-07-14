@@ -31,6 +31,9 @@ class KnowledgeGraphService:
     由 Agent 用于 KG 读取/查询。不维护独立持久化——KG 挂载在 Novel 上。
     """
 
+    # 每章最少保留的字符数，低于此值角色故事线会严重丢失
+    MIN_CHARS_PER_CHAPTER = 2500
+
     def __init__(self, llm: "UnifiedLLM" = None):
         self._llm = llm
 
@@ -55,13 +58,14 @@ class KnowledgeGraphService:
     ) -> "StoryGraph":
         """分批增量构建知识图谱。
 
+        - 每章至少保证 MIN_CHARS_PER_CHAPTER 字的文本预算
         - 第一批做全量提取建立基础 KG
         - 后续批次做增量更新
-        - batch_size 控制每批包含几章，平衡速度与精度
+        - batch_size 控制每批包含几章，但会自动缩减以保证每章有足够文本
 
         Args:
             chapters: ChapterInfo 列表
-            batch_size: 每批处理的章节数（默认 10）
+            batch_size: 每批期望处理的章节数（默认 10，可能因文本预算自动缩减）
             max_chars_per_batch: 每批最大字符数
 
         Returns:
@@ -75,16 +79,15 @@ class KnowledgeGraphService:
         client = self._llm._client if self._llm else None
         model = self._llm.model if self._llm else "deepseek-chat"
 
-        # 将章节分组
-        batches = []
-        for i in range(0, total, batch_size):
-            batch = chapters[i:i + batch_size]
-            batches.append(batch)
+        # 将章节分组（每章至少 MIN_CHARS_PER_CHAPTER 字）
+        batches = self._smart_batch(chapters, batch_size, max_chars_per_batch)
 
         for bi, batch in enumerate(batches):
             ch_range = f"第{batch[0].index}-{batch[-1].index}章"
             batch_text = self._join_chapters(batch, max_chars_per_batch)
-            progress = f"[KG] ({bi+1}/{len(batches)}) {ch_range}"
+            # 每章实际文本量
+            avg_chars = len(batch_text) // max(len(batch), 1)
+            progress = f"[KG] ({bi+1}/{len(batches)}) {ch_range} ({len(batch)}章, 均{avg_chars}字/章)"
 
             if bi == 0:
                 # 第一批：全量提取
@@ -123,13 +126,42 @@ class KnowledgeGraphService:
         return graph
 
     @staticmethod
+    def _smart_batch(chapters: list, batch_size: int,
+                     max_chars_per_batch: int) -> list:
+        """智能分批：保证每章至少有 MIN_CHARS_PER_CHAPTER 字的文本预算。
+
+        如果 batch_size 太大导致每章预算不足，自动缩减每批章数。
+
+        Args:
+            chapters: 所有章节列表
+            batch_size: 期望的每批章数
+            max_chars_per_batch: 每批最大字符数
+
+        Returns:
+            分批后的章节列表
+        """
+        min_chars = KnowledgeGraphService.MIN_CHARS_PER_CHAPTER
+        # 每批最多容纳的章数（按每章 min_chars 算）
+        max_chapters_per_batch = max(1, max_chars_per_batch // min_chars)
+        effective_size = min(batch_size, max_chapters_per_batch)
+
+        batches = []
+        for i in range(0, len(chapters), effective_size):
+            batch = chapters[i:i + effective_size]
+            batches.append(batch)
+        return batches
+
+    @staticmethod
     def _join_chapters(chapters: list, max_chars: int) -> str:
-        """将多个章节拼接为一批文本，不超过 max_chars。"""
+        """将多个章节拼接为一批文本，每章至少 MIN_CHARS_PER_CHAPTER 字。
+
+        优先保证每章的文本量，而非均分导致每章只剩几百字。
+        """
+        min_chars = KnowledgeGraphService.MIN_CHARS_PER_CHAPTER
         parts = []
         total = 0
-        per_ch = max_chars // max(len(chapters), 1)
         for ch in chapters:
-            text = (ch.content or "")[:per_ch]
+            text = (ch.content or "")[:min_chars]
             if text.strip():
                 parts.append(f"第{ch.index}章 {ch.title}\n{text}")
                 total += len(text)
