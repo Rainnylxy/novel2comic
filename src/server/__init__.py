@@ -7,6 +7,8 @@ from .write_handlers import (
     WriteStartHandler,
     WriteInjectHandler,
     WriteStateHandler,
+    ChapterListHandler,
+    ChapterDetailHandler,
 )
 
 
@@ -28,6 +30,8 @@ def create_app(ctx, services, llm) -> tornado.web.Application:
             (r"/api/write/start", WriteStartHandler),
             (r"/api/write/inject", WriteInjectHandler),
             (r"/api/write/state", WriteStateHandler),
+            (r"/api/write/chapters", ChapterListHandler),
+            (r"/api/write/chapter/(\d+)", ChapterDetailHandler),
         ],
         **settings,
     )
@@ -41,9 +45,11 @@ def start_server(ctx, services, llm, port: int = 8000):
     print(f"\n{'='*50}")
     print(f"  Novel2Comic 续写引擎 Web 服务")
     print(f"  地址: http://localhost:{port}")
-    print(f"  POST /api/write/start  — 启动续写")
-    print(f"  POST /api/write/inject — 注入指令")
-    print(f"  GET  /api/write/state  — 查询状态")
+    print(f"  POST /api/write/start    — 启动续写")
+    print(f"  POST /api/write/inject   — 注入指令")
+    print(f"  GET  /api/write/state    — 查询状态")
+    print(f"  GET  /api/write/chapters      — 章节列表")
+    print(f"  GET  /api/write/chapter/(\d+) — 章节详情")
     print(f"  按 Ctrl+C 停止服务")
     print(f"{'='*50}\n")
     tornado.ioloop.IOLoop.current().start()

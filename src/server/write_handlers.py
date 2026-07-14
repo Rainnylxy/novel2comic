@@ -5,6 +5,8 @@
   POST /api/write/start   — 启动续写，返回 SSE 流
   POST /api/write/inject  — 注入用户指令
   GET  /api/write/state   — 查询续写状态
+  GET  /api/write/chapters      — 章节列表
+  GET  /api/write/chapter/(\d+) — 章节详情
 """
 
 import asyncio
@@ -157,4 +159,96 @@ class WriteStateHandler(tornado.web.RequestHandler):
             "phase": _active_pipeline.phase,
             "chapter": _active_pipeline.chapter,
             "fragment_count": _active_pipeline.fragment_count,
+        })
+
+
+class ChapterListHandler(tornado.web.RequestHandler):
+    """GET /api/write/chapters — 返回已生成续写章节的索引列表。"""
+
+    def set_default_headers(self):
+        self.set_header("Access-Control-Allow-Origin", "*")
+        self.set_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.set_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def options(self):
+        self.set_status(204)
+        self.finish()
+
+    def get(self):
+        if _active_pipeline is None:
+            self.write({
+                "chapters": [],
+                "current_chapter": 0,
+                "original_count": 0,
+            })
+            return
+
+        project_dir = (_active_pipeline._ctx.novel.output_dir
+                       if _active_pipeline._ctx.novel else "")
+        original_count = (
+            len(_active_pipeline._ctx.novel.chapters)
+            if _active_pipeline._ctx.novel else 0
+        )
+
+        chapters = []
+        from ..pipeline.pipeline import ContinuationPipeline
+        generated = ContinuationPipeline._scan_generated_chapters(
+            project_dir, original_count,
+        )
+        for ch_num in sorted(generated):
+            ch_data = ContinuationPipeline._load_chapter_full_from_disk(
+                project_dir, ch_num,
+            )
+            chapters.append({
+                "chapter_number": ch_num,
+                "title": ch_data.get("title", ""),
+                "fragment_count": ch_data.get("fragment_count", 0),
+            })
+
+        self.write({
+            "chapters": chapters,
+            "current_chapter": _active_pipeline.chapter,
+            "original_count": original_count,
+        })
+
+
+class ChapterDetailHandler(tornado.web.RequestHandler):
+    """GET /api/write/chapter/(\d+) — 返回单章完整数据。"""
+
+    def set_default_headers(self):
+        self.set_header("Access-Control-Allow-Origin", "*")
+        self.set_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.set_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def options(self):
+        self.set_status(204)
+        self.finish()
+
+    def get(self, chapter_number_str: str):
+        chapter_number = int(chapter_number_str)
+
+        if _active_pipeline is None:
+            self.set_status(404)
+            self.write({"error": "No active session"})
+            return
+
+        project_dir = (_active_pipeline._ctx.novel.output_dir
+                       if _active_pipeline._ctx.novel else "")
+
+        from ..pipeline.pipeline import ContinuationPipeline
+        ch_data = ContinuationPipeline._load_chapter_full_from_disk(
+            project_dir, chapter_number,
+        )
+
+        if not ch_data:
+            self.set_status(404)
+            self.write({"error": f"Chapter {chapter_number} not found"})
+            return
+
+        self.write({
+            "chapter_number": ch_data.get("chapter_number", chapter_number),
+            "title": ch_data.get("title", ""),
+            "synopsis": ch_data.get("synopsis", ""),
+            "fragments": ch_data.get("fragments", []),
+            "review": ch_data.get("review", {}),
         })
