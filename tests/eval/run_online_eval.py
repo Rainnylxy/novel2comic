@@ -39,7 +39,7 @@ def _load_dotenv():
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, _, val = line.partition("=")
-                key, val = key.strip(), val.strip()
+                key, val = key.strip(), val.strip().strip("\"'")
                 if key and key not in os.environ:
                     os.environ[key] = val
 
@@ -73,8 +73,8 @@ def _build_services():
     from src.services import KnowledgeGraphService, ProjectService
 
     api_key = os.getenv("AGENTFLOW_API_KEY", "")
-    base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/v1")
-    model = os.getenv("AGENTFLOW_MODEL", "deepseek-chat")
+    base_url = os.getenv("AGENTFLOW_BASE_URL", "https://api.deepseek.com/")
+    model = os.getenv("AGENTFLOW_MODEL", "deepseek-v4-flash")
     proxy = os.getenv("AGENTFLOW_PROXY", "")
 
     if not api_key:
@@ -140,7 +140,7 @@ async def run_online_eval(
     print("\n[1/5] 初始化 LLM + 服务...")
     t0 = time.time()
     ctx, services, llm = _build_services()
-    print(f"  模型: {os.getenv('LLM_MODEL', 'deepseek-chat')} ({time.time() - t0:.1f}s)")
+    print(f"  模型: {os.getenv('AGENTFLOW_TOOL_MODEL', 'deepseek-chat')} ({time.time() - t0:.1f}s)")
 
     # ── 2. 加载小说 + KG 提取 + 蒸馏 ──
     print(f"\n[2/5] 加载小说 + KG 提取 + 蒸馏...")
@@ -239,35 +239,9 @@ async def run_online_eval(
             json.dump(context, f, ensure_ascii=False, indent=2)
         print(f"  context: {len(context.get('character_profiles', {}))} 角色")
 
-    # ── 5. 运行 trace verifier ──
+    # ── 5. 运行 trace verifier + 写 outputs & verdicts ──
     print(f"\n[5/5] 运行 trace verifier...")
-
-    # 加载 trace 用例
-    trace_cases_path = os.path.join(INPUTS_DIR, "trace-v1.jsonl")
-    trace_cases = []
-    if os.path.exists(trace_cases_path):
-        with open(trace_cases_path, "r", encoding="utf-8") as f:
-            trace_cases = [json.loads(line) for line in f if line.strip()]
-
-    # 运行 verifier
-    from run_eval import run_trace_eval, write_verdicts
-
-    if trace_cases and trace_fixtures:
-        # 给没有 fixture 字段的 case 自动匹配
-        for case in trace_cases:
-            if "fixture" not in case:
-                # 按 agent 类型自动匹配
-                agent = case.get("agent", "")
-                fixtures_of_type = [k for k in trace_fixtures.keys()
-                                   if ("arch" in k and "Architect" in agent)
-                                   or ("writer" in k and "Writer" in agent)]
-                if fixtures_of_type:
-                    case["fixture"] = fixtures_of_type[0]
-
-        verdicts = run_trace_eval(trace_cases)
-        write_verdicts(verdicts, "trace", "online", "online")
-    else:
-        print("  无 trace 用例或 trace fixture，跳过")
+    _run_trace_verifier(trace_fixtures)
 
     # ── 总结 ──
     print(f"\n{'=' * 60}")
@@ -287,6 +261,59 @@ async def run_online_eval(
         "trace_fixtures": trace_fixtures,
         "elapsed": elapsed,
     }
+
+
+def _run_trace_verifier(trace_fixtures: dict):
+    """运行 trace verifier 并写 outputs + verdicts。"""
+    from run_eval import run_trace_eval, write_verdicts
+
+    # 加载用例
+    trace_cases_path = os.path.join(INPUTS_DIR, "trace-v1.jsonl")
+    trace_cases = []
+    if os.path.exists(trace_cases_path):
+        with open(trace_cases_path, "r", encoding="utf-8") as f:
+            trace_cases = [json.loads(line) for line in f if line.strip()]
+    print(f"  用例: {len(trace_cases)} 条")
+
+    fixture_keys = list(trace_fixtures.keys())
+    print(f"  fixtures: {fixture_keys}")
+
+    if not trace_cases or not fixture_keys:
+        print(f"  跳过: cases={len(trace_cases)}, fixtures={len(fixture_keys)}")
+        return
+
+    # 按 agent 类型匹配 fixture 到 case
+    remaining = list(fixture_keys)
+    for case in trace_cases:
+        agent = case.get("agent", "")
+        matched = None
+        for fk in remaining:
+            if ("arch" in fk and "Architect" in agent) or \
+               ("writer" in fk and "Writer" in agent):
+                matched = fk
+                break
+        if matched:
+            case["fixture"] = f"trace_{matched}"  # fixture 文件名前缀
+            remaining.remove(matched)
+        elif remaining:
+            case["fixture"] = f"trace_{remaining.pop(0)}"
+        print(f"    {case['id']} → {case.get('fixture', '?')} "
+              f"expected: {case.get('expected_tools', [])}")
+
+    # Stage 2: 写 outputs（runner 中间产物）
+    outputs_path = os.path.join(EVAL_DIR, "outputs", "outputs_trace-online.jsonl")
+    os.makedirs(os.path.dirname(outputs_path), exist_ok=True)
+    with open(outputs_path, "w", encoding="utf-8") as f:
+        for case in trace_cases:
+            f.write(json.dumps({"id": case["id"], "fixture": case.get("fixture"),
+                                "expected_tools": case.get("expected_tools", [])},
+                               ensure_ascii=False) + "\n")
+    print(f"  outputs → {outputs_path}")
+
+    # Stage 3: 运行 verifier + 写 verdicts
+    verdicts = run_trace_eval(trace_cases)
+    print(f"  verdicts: {len(verdicts)} 条")
+    write_verdicts(verdicts, "trace", "online", "online")
 
 
 def parse_args():
@@ -328,6 +355,8 @@ def main():
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         print(f"  保存 {len(trace_fixtures)} 个 trace fixtures")
+
+        _run_trace_verifier(trace_fixtures)
         return
 
     asyncio.run(run_online_eval(

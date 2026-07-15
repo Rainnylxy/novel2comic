@@ -3,18 +3,18 @@
   "turns": [
     {
       "turn": 1,
-      "thought": "Decided to call: ['lookup_character', 'lookup_character']",
+      "thought": "我需要先确认角色的最新状态，确保写作的准确性。",
       "tool_calls": [
         {
           "name": "lookup_character",
           "args": {
-            "name": "江停"
+            "name": "韩平"
           }
         },
         {
           "name": "lookup_character",
           "args": {
-            "name": "秦徵"
+            "name": "Cindy"
           }
         }
       ]

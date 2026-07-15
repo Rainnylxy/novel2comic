@@ -114,6 +114,10 @@ class BaseAgent:
     def _get_skill_path(self) -> str:
         return os.path.join(SKILLS_DIR, f"{self.SKILL_NAME}.md")
 
+    def _get_thinking_mode(self):
+        """子类覆盖以使用不同的思考模式。默认 ReAct。"""
+        return ThinkingMode.REACT
+
     def _get_memory_profile(self) -> MemoryProfile:
         return MemoryProfile(
             working=WorkingConfig(max_turns=30, max_tokens=8000),
@@ -187,7 +191,7 @@ class BaseAgent:
             .with_llm(self._services.agent_llm)
             .with_tools(*tools)
             .with_memory(self._get_memory_profile())
-            .with_thinking(ThinkingMode.REACT)
+            .with_thinking(self._get_thinking_mode())
             .with_max_iterations(15)
         )
 

@@ -262,6 +262,15 @@ class PlotArchitect(BaseAgent):
         self._story_memory = story_memory
 
     # ================================================================
+    # 思考模式
+    # ================================================================
+
+    def _get_thinking_mode(self):
+        """Plan-Execute: 第一阶段规划（如创建路线图），第二阶段按计划执行（展开章节规划）。"""
+        from agentflow.runtime.thinking import ThinkingMode
+        return ThinkingMode.PLAN_EXECUTE
+
+    # ================================================================
     # 记忆配置
     # ================================================================
 

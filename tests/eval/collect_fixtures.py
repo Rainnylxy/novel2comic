@@ -108,6 +108,7 @@ def _try_parse_trace_block(lines: list[str], traces: list):
             tool_calls.append({
                 "name": tool_name,
                 "args": tool_args,
+                "output": tc.get("output", "")[:500],
             })
         simplified_turns.append({
             "turn": t.get("turn", len(simplified_turns) + 1),
@@ -159,21 +160,25 @@ def extract_trace_fixtures(traces: list[dict]) -> dict[str, dict]:
             fixtures[fixture_id] = trace
             print(f"    {fixture_id}: 有路线图-验证角色 ({len(tool_names)} tool calls)")
 
-    # Writer traces
+    # Writer traces —— 收集所有 Writer 调用，不过滤
     for i, trace in enumerate(writer_traces):
         tool_names = []
         for turn in trace["turns"]:
             for tc in turn["tool_calls"]:
                 tool_names.append(tc["name"])
 
-        has_lookup_char = "lookup_character" in tool_names
+        has_lookup = "lookup_character" in tool_names
         has_recall = "recall_foreshadowing" in tool_names
 
-        if has_lookup_char:
-            fixture_id = f"t_writer_{i+1:02d}"
-            fixtures[fixture_id] = trace
-            extras = "+ foreshadowing" if has_recall else ""
-            print(f"    {fixture_id}: Writer查角色档案{extras} ({len(tool_names)} tool calls)")
+        fixture_id = f"t_writer_{i+1:02d}"
+        fixtures[fixture_id] = trace
+        tags = []
+        if has_lookup:
+            tags.append("lookup")
+        if has_recall:
+            tags.append("foreshadowing")
+        detail = "+".join(tags) if tags else "无工具调用"
+        print(f"    {fixture_id}: Writer {detail} ({len(tool_names)} tool calls)")
 
     return fixtures
 

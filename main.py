@@ -21,7 +21,7 @@ def _load_dotenv():
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, _, val = line.partition("=")
-                key, val = key.strip(), val.strip()
+                key, val = key.strip(), val.strip().strip("\"'")
                 if key and key not in os.environ:
                     os.environ[key] = val
 

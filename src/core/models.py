@@ -1009,26 +1009,12 @@ class Novel:
     def total_chapters(self) -> int:
         return len(self.chapters)
 
-        """按名称查找角色（支持模糊匹配）。"""
-        return [c for c in self.characters if c.name == name]
-
-        return any(c.name == name for c in self.characters)
-
-        """添加角色到全书库（同名跳过）。"""
-        existing = {c.name for c in self.characters}
-        for char in new_chars:
-            if char.name not in existing:
-                self.characters.append(char)
-                existing.add(char.name)
-
     def to_dict(self) -> dict:
         return {
             "title": self.title,
             "file_path": self.file_path,
             "chapters": [ch.to_dict() for ch in self.chapters],
-            "characters": [c.to_dict() for c in self.characters],
             "story_graph": self.story_graph.to_dict() if self.story_graph else None,
-            "style_profile": self.style_profile.to_dict() if self.style_profile else None,
             "current_chapter_index": self.current_chapter_index,
             "output_dir": self.output_dir,
         }

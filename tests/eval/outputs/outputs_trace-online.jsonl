@@ -1,0 +1,3 @@
+{"id": "t-01", "fixture": "trace_t_arch_01", "expected_tools": ["lookup_roadmap", "verify_character", "lookup_character"]}
+{"id": "t-02", "fixture": "trace_t_writer_01", "expected_tools": ["lookup_character", "recall_foreshadowing"]}
+{"id": "t-03", "fixture": "trace_t_writer_02", "expected_tools": ["lookup_character"]}
