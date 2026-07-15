@@ -388,7 +388,7 @@ class PlotArchitect(BaseAgent):
         )
 
         try:
-            result = self._llm.chat_json(
+            result = self._state.sync_llm.chat_json(
                 system_prompt="你是专业小说分析员。只返回 JSON，不返回其他内容。",
                 user_prompt=prompt,
                 temperature=0.3,
@@ -421,7 +421,6 @@ class PlotArchitect(BaseAgent):
 
     def _build_tools(self) -> list:
         self_ref = self
-        ctx = self._ctx
         kg = self._kg
 
         # 共享工具（来自 SharedToolKit）
@@ -618,7 +617,7 @@ class PlotArchitect(BaseAgent):
                 fixes[name] = resolved
 
                 # 同步更新 KG CharacterNode，后续 lookup_character 直接读到最新数据
-                graph = ctx.novel.story_graph if ctx.novel else None
+                graph = self_ref._state.graph
                 if graph:
                     person = kg.get_person(graph, name) if hasattr(kg, 'get_person') else None
                     if person:
