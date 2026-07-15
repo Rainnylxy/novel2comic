@@ -16,39 +16,37 @@
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..core.context import AppContext, ServiceRegistry
+    pass
 
 
 class SharedToolKit:
     """跨 Agent 公用的 KG 查询工具集。
 
-    所有方法都是纯函数（无副作用），通过注入的 ctx/kg/profiles 工作。
+    所有方法都是纯函数（无副作用），通过注入的 graph/kg/profiles 工作。
     Agent 在自己的 _build_tools() 中用 @tool 包装这些方法。
 
     用法:
-        shared = SharedToolKit(ctx, services, character_profiles, character_statuses)
+        shared = SharedToolKit(graph=graph, kg=kg, character_profiles=profiles)
 
         def _build_tools(self):
             return [
                 shared.make_lookup_character(),
-                shared.make_gather_active_conflicts(),
                 ...agent-specific tools...
             ]
     """
 
     def __init__(
         self,
-        ctx: "AppContext",
-        services: "ServiceRegistry",
+        graph=None,
+        kg=None,
         character_profiles: dict = None,
         character_statuses: dict = None,
         story_memory: object = None,
         plot_threads: list = None,
         enable_cache: bool = False,
     ):
-        self._ctx = ctx
-        self._services = services
-        self._kg = services.kg if services else None
+        self._graph = graph
+        self._kg = kg
         self._character_profiles = character_profiles or {}
         self._character_statuses = character_statuses or {}
         self._story_memory = story_memory
@@ -79,10 +77,10 @@ class SharedToolKit:
         if self._cache is not None and name in self._cache:
             return self._cache[name]
 
-        if not self._ctx.novel:
-            return f"KG 不可用：小说上下文未加载"
+        if not self._graph:
+            return f"KG 不可用：StoryGraph 为空"
 
-        graph = self._ctx.novel.story_graph
+        graph = self._graph
         if not graph:
             return f"KG 不可用：StoryGraph 为空"
 
@@ -263,9 +261,7 @@ class SharedToolKit:
         Returns:
             格式化的冲突列表文本
         """
-        if not self._ctx.novel:
-            return "KG 不可用：小说上下文未加载"
-        graph = self._ctx.novel.story_graph
+        graph = self._graph
         if not graph:
             return "KG 不可用：StoryGraph 为空"
         if not self._kg:

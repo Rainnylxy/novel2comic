@@ -17,8 +17,7 @@ from agentflow.runtime.thinking import ThinkingMode
 from ..agent_memory import AgentMemory
 
 if TYPE_CHECKING:
-    from ..core.context import AppContext, ServiceRegistry
-    from ..core.llm import UnifiedLLM
+    from ..pipeline.state import PipelineState
 
 SKILLS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -60,19 +59,24 @@ class BaseAgent:
 
     def __init__(
         self,
-        ctx: "AppContext",
-        services: "ServiceRegistry",
-        llm: "UnifiedLLM" = None,
+        agent_llm: object,
+        kg: object,
+        state: "PipelineState",
         memory: Optional[AgentMemory] = None,
     ):
-        self._ctx = ctx
-        self._services = services
-        self._llm = llm or (services.llm if services else None)
+        self._agent_llm = agent_llm
+        self._kg = kg
+        self._state = state
         self._memory = memory or AgentMemory()
         self._identity_prompt: str = ""
         self._built_agent = None
         self._needs_rebuild = False
         self._pending_references: dict[str, str] = {}
+
+        # 子类属性默认值
+        self._character_profiles = getattr(state, 'character_profiles', {})
+        self._character_statuses: dict = {}
+        self._style_profile = getattr(state, 'style_profile', None)
 
     # ── 身份 Prompt ──
 
@@ -153,8 +157,58 @@ class BaseAgent:
     # ── Reference 卡 ──
 
     def _get_references(self) -> dict[str, str]:
-        """子类覆盖。返回 {key: content} 映射，BaseAgent 负责推入。"""
-        return {}
+        """默认实现：角色状态硬约束 + 文风概要 + 核心角色 Voice。
+
+        子类可覆盖以追加 Agent 专属 Reference 卡。
+        """
+        refs = {}
+
+        # ── 角色状态硬约束 ──
+        if self._character_statuses:
+            dead = [n for n, s in self._character_statuses.items()
+                    if s in ("dead", "deceased", "killed")]
+            missing = [n for n, s in self._character_statuses.items()
+                       if s == "missing"]
+            lines = []
+            if dead:
+                lines.append(f"已死亡: {', '.join(dead)}（只能以回忆/闪回出现）")
+            if missing:
+                lines.append(f"下落不明: {', '.join(missing)}（不能直接出场）")
+            if lines:
+                refs["character_statuses"] = "\n".join(lines)
+
+        # ── 文风概要 ──
+        if self._style_profile:
+            atmos = self._style_profile.atmosphere
+            narrative = self._style_profile.narrative
+            lines = []
+            if atmos.overall_tone:
+                lines.append(f"基调: {atmos.overall_tone}")
+            if atmos.emotional_tendency:
+                lines.append(f"情感倾向: {atmos.emotional_tendency}")
+            if narrative.cliffhanger_style:
+                lines.append(f"章尾钩子: {narrative.cliffhanger_style}")
+            if narrative.scene_transition_style:
+                lines.append(f"场景过渡: {narrative.scene_transition_style}")
+            if lines:
+                refs["style_profile"] = "\n".join(lines)
+
+        # ── 核心角色 Voice 概要 ──
+        if self._character_profiles:
+            voice_lines = []
+            for name, profile in list(self._character_profiles.items())[:8]:
+                if hasattr(profile, 'voice') and profile.voice:
+                    v = profile.voice
+                    parts = [f"{name}:"]
+                    if v.summary:
+                        parts.append(f"  {v.summary[:100]}")
+                    if v.taboo_words:
+                        parts.append(f"  禁用词: {', '.join(v.taboo_words[:5])}")
+                    voice_lines.append("\n".join(parts))
+            if voice_lines:
+                refs["character_voices"] = "\n\n".join(voice_lines)
+
+        return refs
 
     def set_reference(self, key: str, content: str):
         if self._built_agent is not None:
@@ -179,8 +233,8 @@ class BaseAgent:
         if not self.SKILL_NAME:
             raise ValueError("SKILL_NAME 未设置")
 
-        if self._services is None or self._services.agent_llm is None:
-            raise RuntimeError("services.agent_llm 未初始化，无法构建 Agent")
+        if self._agent_llm is None:
+            raise RuntimeError("agent_llm 未初始化，无法构建 Agent")
 
         tools = self._build_tools()
 
@@ -188,7 +242,7 @@ class BaseAgent:
 
         builder = (
             AgentBuilder(self.SKILL_NAME)
-            .with_llm(self._services.agent_llm)
+            .with_llm(self._agent_llm)
             .with_tools(*tools)
             .with_memory(self._get_memory_profile())
             .with_thinking(self._get_thinking_mode())

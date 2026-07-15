@@ -40,9 +40,8 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 if TYPE_CHECKING:
-    from ..core.context import GlobalContext, ServiceRegistry
-    from ..core.llm import UnifiedLLM
     from ..distillers.style_profile import AuthorStyleProfile
+    from ..pipeline.state import PipelineState
 
 
 # ============================================================
@@ -131,87 +130,23 @@ class PlotArchitect(BaseAgent):
         """热加载：skill body 直接注入 system prompt，不走 use_skill_xxx。"""
         return self._load_skill_body()
 
-    def __init__(self, ctx: "GlobalContext", services: "ServiceRegistry",
-                 llm: "UnifiedLLM", memory=None):
-        super().__init__(ctx, services, llm, memory)
-        self._kg = services.kg
+    def __init__(self, agent_llm, kg, state: "PipelineState", memory=None):
+        super().__init__(agent_llm, kg, state, memory)
+        self._kg = kg
 
         # 运行时上下文（由 set_context 注入，每次 run 前更新）
         self._previous_chapter_ending: str = ""
-        self._style_profile: Optional["AuthorStyleProfile"] = None
-        self._character_profiles: dict = {}
         self._last_chapter: int = 0
         self._user_instruction: str = ""
-        self._character_statuses: dict = {}
-        self._roadmap_store: Optional[dict] = None  # mutable: {data, chapter_index, next_chapter, dirty}
+        self._roadmap_store: Optional[dict] = None
 
-        # 角色验证状态（共享可变引用，Pipeline 和 Architect 共用）
-        self._status_verified: set = set()
-        self._status_fixes: dict = {}
-        self._novel_text: str = ""
+        # 角色验证状态（共享可变引用）
+        self._status_verified: set = state.status_verified
+        self._status_fixes: dict = state.status_fixes
+        self._novel_text: str = state.novel_text
 
-        # 前序章节规划摘要（Pipeline 累积传入，避免重复分析）
+        # 前序章节规划摘要
         self._previous_chapter_plans: list[dict] = []
-
-        # 应用层故事记忆（Pipeline 传入，Architect 只读引用）
-        self._story_memory: Optional[object] = None
-
-    # ================================================================
-    # Reference 卡（BaseAgent._pre_run() 自动拉取）
-    # ================================================================
-
-    def _get_references(self) -> dict[str, str]:
-        """提供稳定的 Reference 卡内容。BaseAgent 负责在每次 run() 前推入。"""
-        refs = {}
-
-        # ── 角色状态硬约束 ──
-        if self._character_statuses:
-            dead = [n for n, s in self._character_statuses.items()
-                    if s in ("dead", "deceased", "killed")]
-            missing = [n for n, s in self._character_statuses.items()
-                       if s == "missing"]
-            lines = []
-            if dead:
-                lines.append(f"已死亡: {', '.join(dead)}")
-                lines.append("只能以回忆/闪回出现，绝不能以存活状态出场")
-            if missing:
-                lines.append(f"下落不明: {', '.join(missing)}")
-                lines.append("不能直接出场，只能通过线索/回忆间接涉及")
-            if lines:
-                refs["character_statuses"] = "\n".join(lines)
-
-        # ── 文风概要 ──
-        if self._style_profile:
-            atmos = self._style_profile.atmosphere
-            narrative = self._style_profile.narrative
-            lines = []
-            if atmos.overall_tone:
-                lines.append(f"基调: {atmos.overall_tone}")
-            if atmos.emotional_tendency:
-                lines.append(f"情感倾向: {atmos.emotional_tendency}")
-            if narrative.cliffhanger_style:
-                lines.append(f"章尾钩子: {narrative.cliffhanger_style}")
-            if narrative.scene_transition_style:
-                lines.append(f"场景过渡: {narrative.scene_transition_style}")
-            if lines:
-                refs["style_profile"] = "\n".join(lines)
-
-        # ── 核心角色 Voice 概要 ──
-        if self._character_profiles:
-            voice_lines = []
-            for name, profile in list(self._character_profiles.items())[:8]:
-                if hasattr(profile, 'voice') and profile.voice:
-                    v = profile.voice
-                    parts = [f"{name}:"]
-                    if v.summary:
-                        parts.append(f"  {v.summary[:100]}")
-                    if v.taboo_words:
-                        parts.append(f"  禁用词: {', '.join(v.taboo_words[:5])}")
-                    voice_lines.append("\n".join(parts))
-            if voice_lines:
-                refs["character_voices"] = "\n\n".join(voice_lines)
-
-        return refs
 
     # ================================================================
     # 上下文设置
@@ -219,47 +154,30 @@ class PlotArchitect(BaseAgent):
 
     def set_context(
         self,
-        previous_chapter_ending: str,
-        character_profiles: dict,
-        last_chapter: int,
-        style_profile: Optional["AuthorStyleProfile"] = None,
+        previous_chapter_ending: str = "",
+        last_chapter: int = 0,
         user_instruction: str = "",
-        character_statuses: dict = None,
         roadmap_store: Optional[dict] = None,
-        status_verified: set = None,
-        status_fixes: dict = None,
-        novel_text: str = "",
         previous_chapter_plans: list = None,
-        story_memory: object = None,
     ):
-        """设置运行时上下文。在每次 run() 前由 Pipeline 调用。
+        """设置每章变化的运行时上下文。
 
         Args:
-            roadmap_store: 可变 dict {data, chapter_index, next_chapter, dirty}，
-                           Agent 通过 lookup_roadmap / update_roadmap 工具读写它。
-            status_verified: 共享可变 set，已验证过的角色名。
-                             Agent 通过 verify_character 工具读写。
-            status_fixes: 共享可变 dict {name: status}，验证后的状态修正。
-            novel_text: 小说全文（用于角色出场章节定位）。
-            previous_chapter_plans: 前序章节规划摘要列表 [{ch, title, synopsis, key_events}],
-                                    让 Agent 知道已规划过的内容。
-            story_memory: StoryMemory 实例（只读引用），包含故事摘要、角色弧线、冲突等。
-
-        不调 set_identity() —— system prompt 来自 skill 文件（缓存），
-        动态上下文通过 run() 中的 _build_dynamic_prefix() 注入。
+            previous_chapter_ending: 上一章结尾文本（衔接）
+            last_chapter: 最后章节号
+            user_instruction: 用户初始指令（仅首章生效）
+            roadmap_store: 可变 dict {data, chapter_index, next_chapter, dirty}
+            previous_chapter_plans: 前序章节规划摘要
         """
         self._previous_chapter_ending = previous_chapter_ending
-        self._style_profile = style_profile
-        self._character_profiles = character_profiles or {}
         self._last_chapter = last_chapter
         self._user_instruction = user_instruction
-        self._character_statuses = character_statuses or {}
         self._roadmap_store = roadmap_store or {}
-        self._status_verified = status_verified or set()
-        self._status_fixes = status_fixes or {}
-        self._novel_text = novel_text
         self._previous_chapter_plans = previous_chapter_plans or []
-        self._story_memory = story_memory
+        # 从 PipelineState 同步每章会变的状态
+        self._character_statuses = self._state.character_statuses
+        self._style_profile = self._state.style_profile
+        self._character_profiles = self._state.character_profiles
 
     # ================================================================
     # 思考模式
@@ -323,13 +241,13 @@ class PlotArchitect(BaseAgent):
             parts.append("## 当前篇章规划\n暂无篇章路线图。请用 update_roadmap 工具创建新的 10-20 章路线图。")
 
         # ── 前序章节规划摘要（从 StoryMemory 读取） ──
-        if self._story_memory:
+        if self._state.story_memory:
             # 故事摘要（压缩后的旧章节）
-            story_summary = getattr(self._story_memory, 'story_summary', '')
+            story_summary = getattr(self._state.story_memory, 'story_summary', '')
             if story_summary:
                 parts.append("## 前情摘要\n" + story_summary[:800])
             # 最近章节规划
-            plan_context = self._story_memory.get_plan_context()
+            plan_context = self._state.story_memory.get_plan_context()
             if plan_context:
                 parts.append(plan_context)
         elif self._previous_chapter_plans:
@@ -490,11 +408,11 @@ class PlotArchitect(BaseAgent):
         """创建 SharedToolKit 实例（每次 _build_tools 调用时刷新）。"""
         from ..tools import SharedToolKit
         return SharedToolKit(
-            ctx=self._ctx,
-            services=self._services,
-            character_profiles=self._character_profiles,
+            graph=self._state.graph,
+            kg=self._kg,
+            character_profiles=self._state.character_profiles,
             character_statuses=self._character_statuses,
-            story_memory=self._story_memory,
+            story_memory=self._state.story_memory,
         )
 
     # ================================================================

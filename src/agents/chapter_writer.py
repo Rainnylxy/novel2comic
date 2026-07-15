@@ -22,8 +22,7 @@ from .base_agent import BaseAgent
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..core.context import GlobalContext, ServiceRegistry
-    from ..core.llm import UnifiedLLM
+    from ..pipeline.state import PipelineState
 
 
 class ChapterWriter(BaseAgent):
@@ -40,18 +39,15 @@ class ChapterWriter(BaseAgent):
         """热加载：skill body 直接注入 system prompt，不走 use_skill_xxx。"""
         return self._load_skill_body()
 
-    def __init__(self, ctx, services, llm, memory=None):
-        super().__init__(ctx, services, llm, memory)
-        self._kg = services.kg
+    def __init__(self, agent_llm, kg, state: "PipelineState", memory=None):
+        super().__init__(agent_llm, kg, state, memory)
+        self._kg = kg
 
         # 运行时上下文（set_context 一次性注入整个 chapter 结构体）
         self._chapter: dict = {}
-        self._style_profile = None
         self._previous_chapter_ending: str = ""
-        self._plot_threads: list = []  # 路线图 + 前序章节引入的伏笔
-        self._character_profiles: dict = {}
-        self._character_statuses: dict = {}
-        self._graph = None
+        self._plot_threads: list = []
+        self._graph = self._state.graph
 
         # 角色查询缓存（同章内避免重复查 KG，set_context 时清空）
         self._lookup_cache: dict = {}
@@ -69,10 +65,6 @@ class ChapterWriter(BaseAgent):
     def set_context(
         self,
         chapter: dict,
-        style_profile,
-        character_profiles: dict,
-        character_statuses: dict = None,
-        graph=None,
         previous_chapter_ending: str = "",
         plot_threads: list = None,
     ):
@@ -80,79 +72,21 @@ class ChapterWriter(BaseAgent):
 
         Args:
             chapter: 完整章节规划 dict
-            style_profile: AuthorStyleProfile
-            character_profiles: 角色蒸馏 Profile
-            character_statuses: 角色状态映射（dead/missing/active）
-            graph: StoryGraph
             previous_chapter_ending: 上一章结尾衔接文本
             plot_threads: 路线图 + 前序章节引入的新伏笔列表
         """
         self._chapter = chapter
-        self._style_profile = style_profile
         self._previous_chapter_ending = previous_chapter_ending
-        self._character_profiles = character_profiles or {}
-        self._character_statuses = character_statuses or {}
-        self._graph = graph
         self._plot_threads = plot_threads or []
-        self._lookup_cache.clear()  # 新章重置角色查询缓存
+        self._graph = self._state.graph
+        # 从 PipelineState 同步每章会变的状态
+        self._character_statuses = self._state.character_statuses
+        self._style_profile = self._state.style_profile
+        self._character_profiles = self._state.character_profiles
+        self._lookup_cache.clear()
 
-        # 预加载本章涉及的所有角色，注入 user prompt，避免每节重复 lookup_character
+        # 预加载本章涉及的所有角色
         self._preloaded_chars_text = self._preload_characters()
-
-    # ================================================================
-    # Reference 卡（BaseAgent._pre_run() 自动拉取）
-    # ================================================================
-
-    def _get_references(self) -> dict[str, str]:
-        """提供稳定的 Reference 卡内容。BaseAgent 负责在每次 run() 前推入。"""
-        refs = {}
-
-        # ── 角色状态硬约束 ──
-        if self._character_statuses:
-            dead = [n for n, s in self._character_statuses.items()
-                    if s in ("dead", "deceased", "killed")]
-            missing = [n for n, s in self._character_statuses.items()
-                       if s == "missing"]
-            lines = []
-            if dead:
-                lines.append(f"已死亡: {', '.join(dead)}（只能以回忆/闪回出现）")
-            if missing:
-                lines.append(f"下落不明: {', '.join(missing)}（不能直接出场）")
-            if lines:
-                refs["character_statuses"] = "\n".join(lines)
-
-        # ── 文风概要 ──
-        if self._style_profile:
-            atmos = self._style_profile.atmosphere
-            narrative = self._style_profile.narrative
-            lines = []
-            if atmos.overall_tone:
-                lines.append(f"基调: {atmos.overall_tone}")
-            if atmos.emotional_tendency:
-                lines.append(f"情感倾向: {atmos.emotional_tendency}")
-            if narrative.cliffhanger_style:
-                lines.append(f"章尾钩子: {narrative.cliffhanger_style}")
-            if narrative.scene_transition_style:
-                lines.append(f"场景过渡: {narrative.scene_transition_style}")
-            if lines:
-                refs["style_profile"] = "\n".join(lines)
-
-        # ── 核心角色 Voice 概要 ──
-        if self._character_profiles:
-            voice_lines = []
-            for name, profile in list(self._character_profiles.items())[:8]:
-                if hasattr(profile, 'voice') and profile.voice:
-                    v = profile.voice
-                    parts = [f"{name}:"]
-                    if v.summary:
-                        parts.append(f"  {v.summary[:100]}")
-                    if v.taboo_words:
-                        parts.append(f"  禁用词: {', '.join(v.taboo_words[:5])}")
-                    voice_lines.append("\n".join(parts))
-            if voice_lines:
-                refs["character_voices"] = "\n\n".join(voice_lines)
-
-        return refs
 
     def _preload_characters(self) -> str:
         """预加载本章涉及的所有角色，返回格式化摘要供注入 user prompt。"""
@@ -373,16 +307,16 @@ class ChapterWriter(BaseAgent):
         ]
 
     def _make_shared_toolkit(self):
-        """创建 SharedToolKit 实例（每次 set_context 后缓存刷新）。"""
+        """创建 SharedToolKit 实例。每次 set_context 后缓存刷新。"""
         from ..tools import SharedToolKit
         return SharedToolKit(
-            ctx=self._ctx,
-            services=self._services,
-            character_profiles=self._character_profiles,
+            graph=self._state.graph,
+            kg=self._kg,
+            character_profiles=self._state.character_profiles,
             character_statuses=self._character_statuses,
             plot_threads=self._plot_threads,
-            story_memory=getattr(self, '_story_memory', None),
-            enable_cache=True,  # 同章内重复查询走缓存
+            story_memory=self._state.story_memory,
+            enable_cache=True,
         )
 
     # ================================================================

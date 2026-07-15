@@ -19,8 +19,7 @@ from .base_agent import BaseAgent
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..core.context import GlobalContext, ServiceRegistry
-    from ..core.llm import UnifiedLLM
+    from ..pipeline.state import PipelineState
 
 
 class ReviewEditor(BaseAgent):
@@ -32,23 +31,20 @@ class ReviewEditor(BaseAgent):
     SKILL_NAME = "review_editor"
 
     def _get_system_prompt(self) -> str:
-        """热加载：skill body 直接注入 system prompt，不走 use_skill_xxx。"""
+        """热加载：skill body 直接注入 system prompt。"""
         return self._load_skill_body()
 
-    def __init__(self, ctx: "GlobalContext", services: "ServiceRegistry",
-                 llm: "UnifiedLLM", memory=None):
-        super().__init__(ctx, services, llm, memory)
-        self._kg = services.kg
+    def __init__(self, agent_llm, kg, state: "PipelineState", memory=None):
+        super().__init__(agent_llm, kg, state, memory)
+        self._kg = kg
         self._draft_fragments: list = []
-        self._character_profiles: dict = {}
-        self._style_profile = None
 
-    def set_context(self, draft_fragments: list, character_profiles: dict,
-                    style_profile=None):
+    def set_context(self, draft_fragments: list):
         """设置审校上下文。"""
         self._draft_fragments = draft_fragments
-        self._character_profiles = character_profiles
-        self._style_profile = style_profile
+        # 从 PipelineState 同步
+        self._character_profiles = self._state.character_profiles
+        self._style_profile = self._state.style_profile
 
     async def run(self, task: str = ""):
         """审校并修订草稿。单次 LLM 调用，不走 ReAct。"""
@@ -85,7 +81,7 @@ class ReviewEditor(BaseAgent):
                 char_specs[name] = spec
 
         # 提取 KG 事件时间线
-        graph = self._ctx.novel.story_graph if self._ctx.novel else None
+        graph = self._state.graph
         timeline_text = ""
         if graph and graph.event_nodes:
             events = sorted(graph.event_nodes, key=lambda e: e.chapter_start or 0)
@@ -134,7 +130,7 @@ class ReviewEditor(BaseAgent):
         )
 
         try:
-            result = self._llm.chat_json(
+            result = self._state.sync_llm.chat_json(
                 system_prompt=(
                     "你是专业的审校编辑。检查续写草稿的角色一致性、时间线正确性和设定矛盾。"
                     "发现问题直接修正，不要只标记。只返回 JSON。"

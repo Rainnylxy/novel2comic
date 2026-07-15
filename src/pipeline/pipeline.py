@@ -16,6 +16,7 @@ import re
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 
 from .fragment import PipelineEvent, StoryFragment
+from .state import PipelineState
 from ..agents.plot_architect import PlotArchitect, make_fallback_chapter, make_fallback_roadmap
 from ..agents.chapter_writer import ChapterWriter
 from ..agents.review_editor import ReviewEditor
@@ -77,6 +78,9 @@ class ContinuationPipeline:
 
         # 应用层记忆：故事状态的单一事实源
         self._story_memory = StoryMemory()
+
+        # Agent 共享状态（取代 ctx/services 的全量注入）
+        self._state = PipelineState()
 
     @property
     def phase(self) -> str:
@@ -543,9 +547,29 @@ class ContinuationPipeline:
 
     def _init_agents(self):
         """初始化 3 个 Agent。"""
-        self.architect = PlotArchitect(self._ctx, self._services, self._llm)
-        self.writer = ChapterWriter(self._ctx, self._services, self._llm)
-        self.review_editor = ReviewEditor(self._ctx, self._services, self._llm)
+        # 构建共享状态（此后 agent 通过 state 按需访问，不再依赖 ctx/services）
+        self._state = PipelineState(
+            novel=self._ctx.novel if self._ctx else None,
+            style_profile=self._style_profile,
+            character_profiles=self._character_profiles,
+            story_memory=self._story_memory,
+            status_verified=self._status_verified,
+            status_fixes=self._status_fixes,
+            novel_text=self._novel_text,
+            kg=self._kg,
+            agent_llm=self._services.agent_llm if self._services else None,
+            sync_llm=self._llm,
+        )
+
+        self.architect = PlotArchitect(
+            self._state.agent_llm, self._kg, self._state,
+        )
+        self.writer = ChapterWriter(
+            self._state.agent_llm, self._kg, self._state,
+        )
+        self.review_editor = ReviewEditor(
+            self._state.agent_llm, self._kg, self._state,
+        )
 
     async def run(self, instruction: str = "",
                   auto_loop: bool = True) -> AsyncGenerator[PipelineEvent, None]:
@@ -593,19 +617,16 @@ class ContinuationPipeline:
                 "project_dir": project_dir,
             }
 
+            # 同步 PipelineState 中每章会变的部分
+            self._state.refresh_statuses()
+            self._state.novel_text = self._get_novel_text()
+
             self.architect.set_context(
                 previous_chapter_ending=self._previous_chapter_ending,
-                style_profile=self._style_profile,
-                character_profiles=self._character_profiles,
                 last_chapter=self._chapter,
                 user_instruction=active_instruction,
-                character_statuses=self._get_character_statuses(),
                 roadmap_store=roadmap_store,
-                status_verified=self._status_verified,
-                status_fixes=self._status_fixes,
-                novel_text=self._get_novel_text(),
                 previous_chapter_plans=self._chapter_plan_history,
-                story_memory=self._story_memory,
             )
 
             chapter_raw = await self.architect.run(
@@ -677,10 +698,6 @@ class ContinuationPipeline:
 
             self.writer.set_context(
                 chapter=chapter,
-                style_profile=self._style_profile,
-                character_profiles=self._character_profiles,
-                character_statuses=self._get_character_statuses(),
-                graph=self._ctx.novel.story_graph if self._ctx.novel else None,
                 previous_chapter_ending=self._previous_chapter_ending,
                 plot_threads=self._introduced_threads,
             )
@@ -717,11 +734,7 @@ class ContinuationPipeline:
             print(f"[第{chapter_count}章] Phase 3/3 — 审校修订...")
             yield PipelineEvent("phase", {"phase": "reviewing"})
 
-            self.review_editor.set_context(
-                draft_fragments=draft_fragments,
-                character_profiles=self._character_profiles,
-                style_profile=self._style_profile,
-            )
+            self.review_editor.set_context(draft_fragments=draft_fragments)
             result_raw = await self.review_editor.run("审校并修订草稿")
             result = self._parse_review_result(result_raw)
 
