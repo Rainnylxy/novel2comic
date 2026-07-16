@@ -10,6 +10,10 @@ _CN_NUM = {
     "零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
     "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
     "十": 10, "百": 100, "千": 1000,
+    # 大写数字
+    "壹": 1, "贰": 2, "叁": 3, "肆": 4,
+    "伍": 5, "陆": 6, "柒": 7, "捌": 8, "玖": 9,
+    "拾": 10, "佰": 100, "仟": 1000,
 }
 
 
@@ -48,6 +52,8 @@ CHAPTER_PATTERNS = [
     re.compile(r"^第\s*([一二三四五六七八九十百千零\d]+)\s*[章节回]\s*(.*)$"),
     # "第X卷 第Y章" → 取最后的章节号
     re.compile(r"^第\s*[一二三四五六七八九十百千零\d]+\s*卷\s+第\s*([一二三四五六七八九十百千零\d]+)\s*[章节回]\s*(.*)$"),
+    # "任意短前缀 + 第Y章" — 如 ☆、第一章 / 壹、第一章 / 第1卷 第5章
+    re.compile(r"^.{1,12}第\s*([一二三四五六七八九十百千零壹贰叁肆伍陆柒捌玖\d]+)\s*[章节回]\s*(.*)$"),
     # "Chapter X: Title" / "Chapter X"
     re.compile(r"^[Cc]hapter\s+(\d+)\s*:?\s*(.*)$"),
     # "X、标题" (数字顿号开头，可能是章节)
@@ -75,7 +81,7 @@ def parse_novel_chapters(text: str, title: str = "未命名小说") -> list[Chap
     chapter_boundaries = []  # [(line_index, chapter_number, chapter_title)]
 
     for i, line in enumerate(lines):
-        line_stripped = line.strip()
+        line_stripped = line.strip().strip('　')
         if not line_stripped:
             continue
 
