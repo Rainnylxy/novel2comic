@@ -2,7 +2,7 @@
 """章节解析器——从小说全文自动识别和切分章节。"""
 
 import re
-from .core.models import ChapterInfo
+from .models import ChapterInfo
 
 
 # 中文数字映射
