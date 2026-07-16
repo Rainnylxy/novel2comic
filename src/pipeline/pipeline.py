@@ -256,18 +256,6 @@ class ContinuationPipeline:
         # 7. Session 恢复：检测已生成章节并从断点继续
         self._restore_session(project_dir)
 
-    def _get_character_statuses(self) -> dict:
-        """获取角色状态映射（从 StoryMemory 读取）。
-
-        不做主动验证——验证由 Architect 的 verify_character 工具按需触发。
-        只返回 non-active 状态（active 是默认，不需要约束提示）。
-
-        Returns:
-            {name: status}
-        """
-        return {n: s for n, s in self._story_memory.get_character_statuses().items()
-                if s != "active"}
-
     def _verify_characters_in_text(self, text: str):
         """按需验证：提取文本中提到的角色，对其做现场状态验证。
 
