@@ -34,8 +34,8 @@ class ReviewEditor(BaseAgent):
         """热加载：skill body 直接注入 system prompt。"""
         return self._load_skill_body()
 
-    def __init__(self, agent_llm, kg, state: "PipelineState", memory=None):
-        super().__init__(agent_llm, kg, state, memory)
+    def __init__(self, agent_llm, kg, state: "PipelineState"):
+        super().__init__(agent_llm, kg, state)
         self._kg = kg
         self._draft_fragments: list = []
 

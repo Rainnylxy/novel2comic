@@ -14,8 +14,6 @@ from agentflow.runtime.builder import AgentBuilder
 from agentflow.runtime.memory.manager import MemoryProfile, WorkingConfig
 from agentflow.runtime.thinking import ThinkingMode
 
-from ..agent_memory import AgentMemory
-
 if TYPE_CHECKING:
     from ..pipeline.state import PipelineState
 
@@ -62,12 +60,10 @@ class BaseAgent:
         agent_llm: object,
         kg: object,
         state: "PipelineState",
-        memory: Optional[AgentMemory] = None,
     ):
         self._agent_llm = agent_llm
         self._kg = kg
         self._state = state
-        self._memory = memory or AgentMemory()
         self._identity_prompt: str = ""
         self._built_agent = None
         self._needs_rebuild = False

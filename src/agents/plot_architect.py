@@ -130,8 +130,8 @@ class PlotArchitect(BaseAgent):
         """热加载：skill body 直接注入 system prompt，不走 use_skill_xxx。"""
         return self._load_skill_body()
 
-    def __init__(self, agent_llm, kg, state: "PipelineState", memory=None):
-        super().__init__(agent_llm, kg, state, memory)
+    def __init__(self, agent_llm, kg, state: "PipelineState"):
+        super().__init__(agent_llm, kg, state)
         self._kg = kg
 
         # 运行时上下文（由 set_context 注入，每次 run 前更新）
