@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """知识图谱服务 —— 所有 Agent 的"剧本圣经"。
 
-封装 src/knowledge_graph.py 中的函数，
+封装 src/core/knowledge_graph.py 中的函数，
 提供统一的查询/提取/序列化接口。
 替代原来 7 个查询 Agent 工具。
 """
 
 from typing import Optional, TYPE_CHECKING
 
-from ..knowledge_graph import (
+from ..core.knowledge_graph import (
     extract_story_graph_from_text,
     update_story_graph_with_chapter,
     graph_to_context,

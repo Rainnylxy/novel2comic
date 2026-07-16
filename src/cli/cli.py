@@ -76,7 +76,7 @@ def _load_novel(novel_path: str, services: ServiceRegistry, ctx: AppContext,
     如果已有缓存的 KG（projects 目录下），直接加载，跳过提取。
     force_rebuild=True 强制重新提取。
     """
-    from ..chapter_parser import parse_novel_chapters
+    from ..core.chapter_parser import parse_novel_chapters
     from ..core.models import Novel
 
     print(f"[Loading] 正在加载 {novel_path}...")

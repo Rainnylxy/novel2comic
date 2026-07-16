@@ -107,7 +107,7 @@ class ContinuationPipeline:
         Args:
             novel_path: 小说文件路径（如 novels/poyun.txt）
         """
-        from ..chapter_parser import parse_novel_chapters
+        from ..core.chapter_parser import parse_novel_chapters
         from ..core.models import Novel
         from ..services.project_service import ProjectService as PS
         from ..distillers.character_distiller import CharacterDistiller

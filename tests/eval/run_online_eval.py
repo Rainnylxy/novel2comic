@@ -125,7 +125,7 @@ async def run_online_eval(
     """
     from src.pipeline.pipeline import ContinuationPipeline
     from src.services.project_service import ProjectService as PS
-    from src.chapter_parser import parse_novel_chapters
+    from src.core.chapter_parser import parse_novel_chapters
     from src.core.models import Novel
 
     print("=" * 60)
