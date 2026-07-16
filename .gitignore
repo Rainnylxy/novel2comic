@@ -7,3 +7,4 @@ agent_trace.log
 .env
 .claude
 CLAUDE.md
+*.md

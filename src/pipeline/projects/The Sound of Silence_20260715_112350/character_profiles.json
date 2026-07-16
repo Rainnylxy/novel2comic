@@ -1,0 +1,646 @@
+{
+  "韩平": {
+    "name": "韩平",
+    "voice": {
+      "avg_sentence_length": 43.9,
+      "sentence_range": [3, 138],
+      "exclamation_density": 0.0027,
+      "ellipsis_density": 0.0045,
+      "question_density": 0.0023,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.6,
+        "imperative": 0.1,
+        "interrogative": 0.25,
+        "exclamatory": 0.05
+      },
+      "tone_cold_warm": 0.2,
+      "tone_hard_soft": 0.3,
+      "tone_distant_close": 0.2,
+      "taboo_words": ["可怜", "软弱", "求求"],
+      "taboo_patterns": ["使用奉承或讨好的语气", "长篇大论解释自己"],
+      "response_pattern": "direct",
+      "rhythm": "responder",
+      "voice_shift": {
+        "notes": "对主任等上级：礼貌简短，内心疏离；对Cindy：直接，带好奇和轻微命令；对陌生人/下属：漠然，用短句或反问。"
+      },
+      "summary": "简洁冷淡，直接疏离，有礼貌漠然"
+    },
+    "boundary": {
+      "hard_rules": [
+        "不会花钱购买性服务",
+        "不会主动迎合或参与俱乐部的低级社交活动",
+        "不会在压力下违背内心对跨性别者的尊重"
+      ],
+      "tendencies": [
+        "对新奇事物（如药娘、跨性别者）保持好奇并主动提问",
+        "出于同情心给予经济或物质帮助",
+        "对上级指令表面服从但内心保持距离和疲惫",
+        "在热闹场合中保持冷静观察，很少融入",
+        "对关于自身血统的议论以礼貌漠然回应"
+      ],
+      "relationship_behaviors": {
+        "Cindy": "从好奇和同情出发，主动给予钱财和衣物帮助，并深入询问其经历与内心",
+        "主任": "服从主任的社交安排，但内心疏离，仅在必要时配合",
+        "侯院长": "礼貌送其回家，但内心对侯院长占有Cindy感到不满，认为Cindy不该属于那种环境"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 40,
+        "Fear": 20,
+        "Anger": 10,
+        "Love": 35,
+        "Honor": 60,
+        "Greed": 15,
+        "Patience": 50,
+        "RiskPreference": 30,
+        "Dominance": 40,
+        "Intelligence": 85
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["被误解为有不良意图（如买身）"],
+          "effects": {
+            "Anger": 0.6,
+            "Trust": -0.4
+          },
+          "evidence": [
+            "第1次相遇：Cindy推回钱说'我不卖'，韩平'整张脸都拧起来'，骂'看傻瓜似地看他'，扔下东西扭头就走"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["看到跨性别者被物化或遭受不公平对待"],
+          "effects": {
+            "Love": 0.45,
+            "Anger": 0.3
+          },
+          "evidence": [
+            "第2次相遇：侯院长冷落Cindy，韩平感觉'星星不该落下地来'；后来给Cindy买衣服，并说'我们一起的'"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["被提及日本血统或归类为外国人"],
+          "effects": {
+            "Anger": 0.25,
+            "Patience": -0.2
+          },
+          "evidence": [
+            "主任抱怨时问'你们日本不这样吧？'，韩平'用礼貌的漠然回应'，内心反感"
+          ],
+          "confidence": "部分推测"
+        },
+        {
+          "triggers": ["被迫参加社交应酬（如被主任叫去俱乐部）"],
+          "effects": {
+            "Patience": -0.3,
+            "RiskPreference": 0.15
+          },
+          "evidence": [
+            "主任打电话叫去俱乐部，韩平本不想去但无奈答应；送侯院长时'心里很累'"
+          ],
+          "confidence": "部分推测"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.05,
+        "Fear": 0.2,
+        "Anger": 0.25,
+        "Love": 0.02,
+        "Honor": 0.08,
+        "Greed": 0.1,
+        "Patience": 0.15,
+        "RiskPreference": 0.05,
+        "Dominance": 0.05,
+        "Intelligence": 0.01
+      },
+      "triggers": {
+        "Trust": ["对方表现出真诚或弱势"],
+        "Anger": ["自我反思或时间流逝"],
+        "Love": ["对方展现出脆弱或需要帮助"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 20,
+          "Anger": 5,
+          "Fear": 5,
+          "Sadness": 15,
+          "Joy": 10
+        },
+        "situation": "在俱乐部初遇Cindy，Cindy拒绝卖酒，韩平好奇打量并觉得他可怜。",
+        "action": "韩平扔下钱说'看你可怜'，然后转身离开。"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 30,
+          "Anger": 0,
+          "Fear": 5,
+          "Sadness": 0,
+          "Joy": 10
+        },
+        "situation": "在健身房散打区，韩平认出昨晚的'妹妹'现在是教练。",
+        "action": "韩平移开眼睛，没有打招呼，继续办卡。"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 40,
+          "Anger": 5,
+          "Fear": 5,
+          "Sadness": 30,
+          "Joy": 0
+        },
+        "situation": "俱乐部里，侯院长搂着Cindy，韩平坐在边缘看到这一幕。",
+        "action": "韩平不看他，但心里觉得他不该在这里。"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 60,
+          "Anger": 0,
+          "Fear": 0,
+          "Sadness": 10,
+          "Joy": 40
+        },
+        "situation": "韩平去翻Cindy住处的盒子后，在电梯口把礼盒递给他。",
+        "action": "韩平说'给你的，拿着啊！'，表现出关心。"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 50,
+          "Anger": 0,
+          "Fear": 0,
+          "Sadness": 5,
+          "Joy": 60
+        },
+        "situation": "俱乐部里，Cindy穿着黑缎面连衣裙，头发盘起，显得与众不同。",
+        "action": "韩平看着他，想让他看起来那么与众不同。"
+      }
+    ],
+    "distilled_at": "2026-07-15T11:25:58.065504",
+    "confidence": "high"
+  },
+  "Cindy": {
+    "name": "Cindy",
+    "voice": {
+      "avg_sentence_length": 47.1,
+      "sentence_range": [2, 158],
+      "exclamation_density": 0.0007,
+      "ellipsis_density": 0.0062,
+      "question_density": 0.004,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.8,
+        "imperative": 0.1,
+        "interrogative": 0.05,
+        "exclamatory": 0.05
+      },
+      "tone_cold_warm": 0.5,
+      "tone_hard_soft": 0.3,
+      "tone_distant_close": 0.4,
+      "taboo_words": ["人家", "讨厌啦", "好讨厌"],
+      "taboo_patterns": ["不会使用撒娇或乞求的语气", "不会使用过于卑微的自称"],
+      "response_pattern": "direct",
+      "rhythm": "responder",
+      "voice_shift": {
+        "notes": "对陌生人或感到被冒犯时，语气冷硬直接，句子短促，甚至爆粗口；对熟悉或亲密的对象（如韩平在跳舞时），语气放松，用词更柔和，句子略长且带坦诚感。"
+      },
+      "summary": "直白带刺，柔中带刚"
+    },
+    "boundary": {
+      "hard_rules": ["不会卖身", "不会容忍物化或不尊重行为"],
+      "tendencies": [
+        "在社交场合先保持冷艳疏离，确认对方真诚后才逐渐靠近",
+        "使用暴力或驱赶快速维护个人边界",
+        "在亲密关系中被动但心照不宣，允许对方试探但保持控制",
+        "通过身体语言和间接行动表达接受或拒绝"
+      ],
+      "relationship_behaviors": {
+        "韩平": "在韩平面前既主动诱惑又严厉设限，接受其真诚但坚决惩罚越界"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 25,
+        "Fear": 50,
+        "Anger": 60,
+        "Love": 60,
+        "Honor": 80,
+        "Greed": 30,
+        "Patience": 50,
+        "RiskPreference": 50,
+        "Dominance": 80,
+        "Intelligence": 60
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["被问及性别身份或身体私密问题"],
+          "effects": {
+            "Anger": 0.7,
+            "Trust": -0.8
+          },
+          "evidence": [
+            "韩平问是否穿女士内裤并想查看时，Cindy踹腿并赶出门：'看你妈个头！'并剥下拖鞋驱逐"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["被冒犯后对方再次接触并展现诚意"],
+          "effects": {
+            "Love": 0.5,
+            "Trust": 0.3
+          },
+          "evidence": [
+            "周三俱乐部Cindy主动靠近，递烟、跳舞，并穿韩平送的文胸，表现出接受"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["对方越界但未完全拒绝暗示的行为"],
+          "effects": {
+            "Dominance": 0.4,
+            "Patience": -0.3
+          },
+          "evidence": [
+            "韩平摸她屁股、剥内衣时，她装睡不动，默认允许但掌握主动权"
+          ],
+          "confidence": "部分推测"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.02,
+        "Fear": 0.2,
+        "Anger": 0.15,
+        "Love": 0.01,
+        "Honor": 0.08
+      },
+      "triggers": {
+        "Trust": ["对方持续真诚、不越界的行为"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 70,
+          "Anger": 10,
+          "Fear": 20
+        },
+        "situation": "Cindy在俱乐部向韩平解释自己停用雌激素并计划攒钱手术",
+        "action": "Cindy点头承认吃过药，并说‘吃了没力气打拳，就停了’、‘等攒够了手术的钱，我再开始吃’"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 10,
+          "Anger": 80,
+          "Fear": 20
+        },
+        "situation": "韩平在Cindy家中越界要求看她穿的女士内裤",
+        "action": "Cindy踹韩平膝盖并骂‘看你妈个头’，将他推出门外"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 70,
+          "Anger": 5,
+          "Fear": 15
+        },
+        "situation": "俱乐部重逢，Cindy主动与韩平跳舞，并让他看到自己穿着韩平送的内衣",
+        "action": "Cindy与韩平相拥跳舞，坦然露出内衣吊带，眼神带着‘要付出代价的样子’"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 60,
+          "Anger": 10,
+          "Fear": 30
+        },
+        "situation": "清晨在粉色窗帘小屋，韩平趁Cindy‘睡着’时触摸并剥下其内裤",
+        "action": "Cindy假装未醒，一动不动，默许韩平的动作"
+      }
+    ],
+    "distilled_at": "2026-07-15T11:26:43.287132",
+    "confidence": "high"
+  },
+  "徐主任": {
+    "name": "徐主任",
+    "voice": {
+      "avg_sentence_length": 32.0,
+      "sentence_range": [3, 97],
+      "exclamation_density": 0.0061,
+      "ellipsis_density": 0.0015,
+      "question_density": 0.0023,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.3,
+        "imperative": 0.6,
+        "interrogative": 0.1,
+        "exclamatory": 0.0
+      },
+      "tone_cold_warm": 0.7,
+      "tone_hard_soft": 0.3,
+      "tone_distant_close": 0.7,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "direct",
+      "rhythm": "initiator",
+      "voice_shift": {
+        "notes": "对下属韩平用命令式玩笑和昵称，语调亲近中带架子；对同级朋友则用骄傲介绍，语气更随意。由于样本有限，差异不明显。"
+      },
+      "summary": "直率亲近的命令式上司"
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [
+        "喜欢组局带新人应酬，利用饭局进行社交",
+        "用抱怨和调侃拉近与下属的距离",
+        "安排下属完成接待任务（如送客人）",
+        "在酒局开场时介绍新人的优点以抬举对方",
+        "递眼色提醒下属少喝酒以保持清醒"
+      ],
+      "relationship_behaviors": {
+        "韩平": "带新人人脉应酬，同时利用其完成接待任务，有培养意图",
+        "刘医生": "通过刘医生提醒韩平敬酒，维持酒桌秩序",
+        "侯院长": "安排下属专程护送以示尊重和熟络"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 65,
+        "Fear": 20,
+        "Anger": 20,
+        "Love": 45,
+        "Honor": 75,
+        "Greed": 50,
+        "Patience": 55,
+        "RiskPreference": 60,
+        "Dominance": 75,
+        "Intelligence": 80
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["新人应对应酬场合"],
+          "effects": {
+            "Dominance": 0.1,
+            "Trust": 0.05
+          },
+          "evidence": ["第1章：主任让韩平敬酒并介绍新人，安排送侯院长"],
+          "confidence": "部分推测"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.02,
+        "Fear": 0.1,
+        "Anger": 0.1,
+        "Love": 0.01,
+        "Honor": 0.05,
+        "Greed": 0.02,
+        "Patience": 0.05,
+        "RiskPreference": 0.03,
+        "Dominance": 0.02,
+        "Intelligence": 0.01
+      },
+      "triggers": {
+        "Trust": ["任务顺利完成"],
+        "Honor": ["被夸赞"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 60,
+          "Anger": 10,
+          "Fear": 5
+        },
+        "situation": "在保时捷上，主任向韩平抱怨日本的生活习惯",
+        "action": "用没完没了的抱怨缠住韩平，反复问‘你们日本不这样吧？’"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 80,
+          "Anger": 5,
+          "Fear": 5
+        },
+        "situation": "在酒席上，主任向兄弟医院的领导介绍韩平",
+        "action": "翘着兰花指，捏着小酒杯，玩笑般介绍韩平是‘好刀’，并让他罚酒"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 75,
+          "Anger": 5,
+          "Fear": 10
+        },
+        "situation": "酒席中，主任安排韩平送侯院长回家",
+        "action": "交代韩平送三院侯院长回去，并递眼色让他‘少喝点’"
+      }
+    ],
+    "distilled_at": "2026-07-15T11:27:27.103067",
+    "confidence": "medium"
+  },
+  "han_ping": {
+    "name": "han_ping",
+    "voice": {
+      "avg_sentence_length": 0.0,
+      "sentence_range": [4, 22],
+      "exclamation_density": 0.0,
+      "ellipsis_density": 0.0,
+      "question_density": 0.0,
+      "first_person": "我",
+      "sentence_types": {},
+      "tone_cold_warm": 0.5,
+      "tone_hard_soft": 0.5,
+      "tone_distant_close": 0.5,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "",
+      "rhythm": "",
+      "voice_shift": {},
+      "summary": ""
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [],
+      "relationship_behaviors": {}
+    },
+    "state": {
+      "baseline": {}
+    },
+    "sensitivity": {
+      "entries": []
+    },
+    "recovery": {
+      "rates": {},
+      "triggers": {}
+    },
+    "policy_anchors": [],
+    "distilled_at": "2026-07-15T11:27:27.104073",
+    "confidence": "low"
+  },
+  "cindy": {
+    "name": "cindy",
+    "voice": {
+      "avg_sentence_length": 0.0,
+      "sentence_range": [4, 22],
+      "exclamation_density": 0.0,
+      "ellipsis_density": 0.0,
+      "question_density": 0.0,
+      "first_person": "我",
+      "sentence_types": {},
+      "tone_cold_warm": 0.5,
+      "tone_hard_soft": 0.5,
+      "tone_distant_close": 0.5,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "",
+      "rhythm": "",
+      "voice_shift": {},
+      "summary": ""
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [],
+      "relationship_behaviors": {}
+    },
+    "state": {
+      "baseline": {}
+    },
+    "sensitivity": {
+      "entries": []
+    },
+    "recovery": {
+      "rates": {},
+      "triggers": {}
+    },
+    "policy_anchors": [],
+    "distilled_at": "2026-07-15T11:27:27.104073",
+    "confidence": "low"
+  },
+  "xu_director": {
+    "name": "xu_director",
+    "voice": {
+      "avg_sentence_length": 0.0,
+      "sentence_range": [4, 22],
+      "exclamation_density": 0.0,
+      "ellipsis_density": 0.0,
+      "question_density": 0.0,
+      "first_person": "我",
+      "sentence_types": {},
+      "tone_cold_warm": 0.5,
+      "tone_hard_soft": 0.5,
+      "tone_distant_close": 0.5,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "",
+      "rhythm": "",
+      "voice_shift": {},
+      "summary": ""
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [],
+      "relationship_behaviors": {}
+    },
+    "state": {
+      "baseline": {}
+    },
+    "sensitivity": {
+      "entries": []
+    },
+    "recovery": {
+      "rates": {},
+      "triggers": {}
+    },
+    "policy_anchors": [],
+    "distilled_at": "2026-07-15T11:27:27.104073",
+    "confidence": "low"
+  },
+  "liu_doctor": {
+    "name": "liu_doctor",
+    "voice": {
+      "avg_sentence_length": 0.0,
+      "sentence_range": [4, 22],
+      "exclamation_density": 0.0,
+      "ellipsis_density": 0.0,
+      "question_density": 0.0,
+      "first_person": "我",
+      "sentence_types": {},
+      "tone_cold_warm": 0.5,
+      "tone_hard_soft": 0.5,
+      "tone_distant_close": 0.5,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "",
+      "rhythm": "",
+      "voice_shift": {},
+      "summary": ""
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [],
+      "relationship_behaviors": {}
+    },
+    "state": {
+      "baseline": {}
+    },
+    "sensitivity": {
+      "entries": []
+    },
+    "recovery": {
+      "rates": {},
+      "triggers": {}
+    },
+    "policy_anchors": [],
+    "distilled_at": "2026-07-15T11:27:27.105078",
+    "confidence": "low"
+  },
+  "hou_president": {
+    "name": "hou_president",
+    "voice": {
+      "avg_sentence_length": 0.0,
+      "sentence_range": [4, 22],
+      "exclamation_density": 0.0,
+      "ellipsis_density": 0.0,
+      "question_density": 0.0,
+      "first_person": "我",
+      "sentence_types": {},
+      "tone_cold_warm": 0.5,
+      "tone_hard_soft": 0.5,
+      "tone_distant_close": 0.5,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "",
+      "rhythm": "",
+      "voice_shift": {},
+      "summary": ""
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [],
+      "relationship_behaviors": {}
+    },
+    "state": {
+      "baseline": {}
+    },
+    "sensitivity": {
+      "entries": []
+    },
+    "recovery": {
+      "rates": {},
+      "triggers": {}
+    },
+    "policy_anchors": [],
+    "distilled_at": "2026-07-15T11:27:27.105078",
+    "confidence": "low"
+  }
+}

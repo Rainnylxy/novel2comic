@@ -1,0 +1,152 @@
+{
+  "type": "roadmap",
+  "roadmap_title": "第二卷·夜与昼",
+  "roadmap_synopsis": "韩平与Cindy在那一夜后，关系从肉体的试探向更深处延展，但医院、俱乐部、健身房三个世界开始碰撞，两人各自的身份困境逐渐浮出水面。",
+  "total_chapters": 15,
+  "milestones": [
+    {
+      "index": 1,
+      "milestone_title": "清晨分界",
+      "synopsis": "次日清晨，韩平在Cindy出租屋醒来，两人在尴尬与暧昧中重新划定边界。",
+      "key_conflicts": ["亲密后的距离感", "韩平许诺vs Cindy不信"],
+      "characters_involved": ["韩平", "Cindy"],
+      "thematic_focus": "欲望后的空虚与身份确认",
+      "expected_tone": "冷峻温情"
+    },
+    {
+      "index": 2,
+      "milestone_title": "白天的身份",
+      "synopsis": "韩平回医院上班，Cindy回健身房教课，两人在各自的白日世界里各怀心事。",
+      "key_conflicts": ["韩平的职业面具", "Cindy的性别切换"],
+      "characters_involved": ["韩平", "Cindy", "徐主任"],
+      "thematic_focus": "昼夜身份分裂",
+      "expected_tone": "双线冷峻"
+    },
+    {
+      "index": 3,
+      "milestone_title": "俱乐部的眼",
+      "synopsis": "侯院长察觉韩平与Cindy的关系变化，暗中施压，俱乐部暗流涌动。",
+      "key_conflicts": ["侯院长的嫉妒与权力", "韩平是否继续去俱乐部"],
+      "characters_involved": ["韩平", "Cindy", "侯院长"],
+      "thematic_focus": "权力与占有",
+      "expected_tone": "悬疑压抑"
+    },
+    {
+      "index": 4,
+      "milestone_title": "健身房风波",
+      "synopsis": "韩平去健身房找Cindy，目睹Cindy与客人冲突，第一次见到他暴力的一面。",
+      "key_conflicts": ["Cindy的暴力边界", "韩平介入还是旁观"],
+      "characters_involved": ["韩平", "Cindy"],
+      "thematic_focus": "暴力与保护",
+      "expected_tone": "紧张激烈"
+    },
+    {
+      "index": 5,
+      "milestone_title": "私密时刻",
+      "synopsis": "韩平带Cindy去自己公寓，两人有了第一次不在俱乐部也不在出租屋的相处。",
+      "key_conflicts": ["韩平暴露私人空间", "Cindy对陌生环境的防御"],
+      "characters_involved": ["韩平", "Cindy"],
+      "thematic_focus": "信任的试探",
+      "expected_tone": "温情克制"
+    },
+    {
+      "index": 6,
+      "milestone_title": "医院的偶遇",
+      "synopsis": "Cindy因伤到医院，以男性身份挂号，韩平在同事面前不知如何介绍他。",
+      "key_conflicts": ["公开场合的身份尴尬", "医患关系的微妙"],
+      "characters_involved": ["韩平", "Cindy", "徐主任"],
+      "thematic_focus": "身份暴露的恐惧",
+      "expected_tone": "紧张尴尬"
+    },
+    {
+      "index": 7,
+      "milestone_title": "侯院长的棋",
+      "synopsis": "侯院长借医院项目向徐主任施压，间接威胁韩平的职业稳定。",
+      "key_conflicts": ["侯院长的权力运作", "韩平的职业风险"],
+      "characters_involved": ["韩平", "徐主任", "侯院长"],
+      "thematic_focus": "权力网络的压迫",
+      "expected_tone": "悬疑压抑"
+    },
+    {
+      "index": 8,
+      "milestone_title": "Cindy的过去",
+      "synopsis": "Cindy向韩平讲述自己的家庭和手术决心，韩平第一次真正理解他的挣扎。",
+      "key_conflicts": ["Cindy的自我暴露恐惧", "韩平能否承载这份信任"],
+      "characters_involved": ["韩平", "Cindy"],
+      "thematic_focus": "创伤与接纳",
+      "expected_tone": "沉重温情"
+    },
+    {
+      "index": 9,
+      "milestone_title": "俱乐部的裂痕",
+      "synopsis": "俱乐部内部因侯院长的不满开始排挤Cindy，Cindy面临失去收入来源。",
+      "key_conflicts": ["Cindy的经济危机", "韩平的援助是否越界"],
+      "characters_involved": ["韩平", "Cindy", "侯院长"],
+      "thematic_focus": "依赖与独立",
+      "expected_tone": "压抑焦灼"
+    },
+    {
+      "index": 10,
+      "milestone_title": "决断",
+      "synopsis": "韩平做了某个决定——要么与Cindy切断联系回归正轨，要么彻底卷入他的世界。",
+      "key_conflicts": ["韩平的终极选择", "内心与外部压力的对抗"],
+      "characters_involved": ["韩平", "Cindy"],
+      "thematic_focus": "选择与代价",
+      "expected_tone": "冷峻决绝"
+    },
+    {
+      "index": 11,
+      "milestone_title": "医院风波",
+      "synopsis": "韩平的选择在医院引发连锁反应，他与徐主任的关系陷入冰点。",
+      "key_conflicts": ["韩平vs体制", "徐主任的失望"],
+      "characters_involved": ["韩平", "徐主任", "侯院长"],
+      "thematic_focus": "背叛与忠诚",
+      "expected_tone": "压抑紧张"
+    },
+    {
+      "index": 12,
+      "milestone_title": "Cindy的反击",
+      "synopsis": "Cindy不再被动忍受，主动应对侯院长的打压，展现锋利的生存本能。",
+      "key_conflicts": ["Cindy vs 侯院长", "以暴制暴的边界"],
+      "characters_involved": ["Cindy", "侯院长", "韩平"],
+      "thematic_focus": "反抗与尊严",
+      "expected_tone": "激烈爽利"
+    },
+    {
+      "index": 13,
+      "milestone_title": "手术倒计时",
+      "synopsis": "Cindy终于攒够手术费，韩平利用医学知识帮他做术前准备。",
+      "key_conflicts": ["手术风险与期待", "二人关系的最终定义"],
+      "characters_involved": ["韩平", "Cindy"],
+      "thematic_focus": "蜕变与重生",
+      "expected_tone": "紧张期待"
+    },
+    {
+      "index": 14,
+      "milestone_title": "病房外",
+      "synopsis": "Cindy手术当天，韩平在手术室外等待，同时处理医院方面的最后摊牌。",
+      "key_conflicts": ["手术成败", "韩平的职业生涯结局"],
+      "characters_involved": ["韩平", "Cindy", "徐主任"],
+      "thematic_focus": "等待与审判",
+      "expected_tone": "紧绷静谧"
+    },
+    {
+      "index": 15,
+      "milestone_title": "新名字",
+      "synopsis": "Cindy术后恢复，韩平与他一起面对新的日常——不再是俱乐部与健身房，而是某种新的可能。",
+      "key_conflicts": ["新生后的不确定", "韩平与Cindy的关系新篇章"],
+      "characters_involved": ["韩平", "Cindy"],
+      "thematic_focus": "开始与未知",
+      "expected_tone": "克制的温暖"
+    }
+  ],
+  "climax_milestone": 12,
+  "final_boss_hints": "侯院长代表的权力与物化体系，以及社会对跨性别者的结构性排斥，是最终的对手",
+  "major_themes": ["身份与归属", "欲望与克制", "边缘与中心"],
+  "plot_threads_introduced": [
+    "侯院长对韩平Cindy关系的察觉与打压",
+    "Cindy的性别确认手术之路",
+    "韩平职业身份与私人情感的对立",
+    "俱乐部-医院-健身房三界的冲突碰撞"
+  ]
+}

@@ -1,0 +1,1239 @@
+{
+  "江停": {
+    "name": "江停",
+    "voice": {
+      "avg_sentence_length": 26.1,
+      "sentence_range": [2, 99],
+      "exclamation_density": 0.0047,
+      "ellipsis_density": 0.0081,
+      "question_density": 0.005,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.75,
+        "imperative": 0.15,
+        "interrogative": 0.08,
+        "exclamatory": 0.02
+      },
+      "tone_cold_warm": 0.2,
+      "tone_hard_soft": 0.6,
+      "tone_distant_close": 0.4,
+      "taboo_words": ["撒娇", "求你了", "我爱你"],
+      "taboo_patterns": ["用夸张表情或语气词", "长篇抒情独白"],
+      "response_pattern": "silence_first",
+      "rhythm": "responder",
+      "voice_shift": {
+        "notes": "对严峫时偏向简洁、冷峻但偶有无奈调侃；对女友杨媚时简短克制；对闻劭或敌人时冰冷、强硬；对下属或陌生人时专业、简短、无情绪"
+      },
+      "summary": "冷静克制，偶有直接与无奈"
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [
+        "在危险情境中迅速反击，不拖泥带水",
+        "面对亲密伴侣的纠缠时最终会妥协让步",
+        "在调查中保持镇定和专业，但内心承受巨大压力",
+        "在回忆爆炸或杀人时会出现情绪崩溃的迹象",
+        "对案情陷入绝境时会提出理论分析来转移情感",
+        "在保护他人时会采取果断行动，不顾自身安危"
+      ],
+      "relationship_behaviors": {
+        "严峫": "既依赖又抗拒，在感情上被动接受，但在关键时刻会保护对方",
+        "闻劭": "表面服从实则敌对，内心极为警惕，随时准备反击",
+        "杨媚": "信任但保持距离，试图减轻她的担忧",
+        "阿杰": "毫不留情地暴力反抗，不惜伤害对方以脱身",
+        "韩小梅": "作为上级保护她，指挥她行动并确保她的安全"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 30,
+        "Fear": 75,
+        "Anger": 40,
+        "Love": 25,
+        "Honor": 90,
+        "Greed": 10,
+        "Patience": 80,
+        "RiskPreference": 70,
+        "Dominance": 60,
+        "Intelligence": 85
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["提及无辜者受害或同事伤亡"],
+          "effects": {
+            "Trust": -0.1,
+            "Fear": 0.2,
+            "Love": -0.15
+          },
+          "evidence": [
+            "第1章爆炸回忆后他对严峫提到冯宇光父母时‘毫无反应’，体现情感回避和恐惧激活"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["面对毒贩或直接威胁"],
+          "effects": {
+            "Fear": 0.25,
+            "Anger": 0.3,
+            "Dominance": -0.1
+          },
+          "evidence": [
+            "面对阿杰时他果断攻击，‘将金属手铐环狠狠砸在了阿杰太阳穴上’，随后手抖、喘息"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["严峫的亲密举动或表白"],
+          "effects": {
+            "Love": 0.1,
+            "Trust": 0.15,
+            "Fear": -0.05,
+            "Anger": 0.05
+          },
+          "evidence": [
+            "严峫表白后他先拒绝（‘吊桥心理’），但后来接受拥抱，并同意‘嫁’"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["回忆起三年前的爆炸和失败"],
+          "effects": {
+            "Fear": 0.4,
+            "Anger": 0.2,
+            "Honor": -0.15,
+            "Patience": -0.1
+          },
+          "evidence": [
+            "第1章爆炸场景：‘他手一松，九二式掉在身前’；苏醒后频繁噩梦，‘相同场景在梦中重复’"
+          ],
+          "confidence": "原文锚定"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.08,
+        "Fear": 0.15,
+        "Anger": 0.1,
+        "Love": 0.06,
+        "Honor": 0.04,
+        "Patience": 0.05,
+        "RiskPreference": 0.02
+      },
+      "triggers": {
+        "Trust": ["严峫持续的支持和坦诚", "案件进展的确认"],
+        "Fear": ["安全环境的建立", "创伤回忆的逐渐处理"],
+        "Anger": ["对毒贩的正义执行力"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 70,
+          "Anger": 10,
+          "Fear": 20
+        },
+        "situation": "严峫按住江停，阻止他离开树丛",
+        "action": "江停向树丛外扬下巴，做出‘请吧’的口型"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 50,
+          "Anger": 10,
+          "Fear": 40
+        },
+        "situation": "严峫拥抱江停表示不想离开",
+        "action": "江停推开严峫，说‘不能待在这里’，并带他走"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 10,
+          "Anger": 80,
+          "Fear": 70
+        },
+        "situation": "阿杰伸手抓江停胳膊",
+        "action": "江停用金属手铐环狠狠砸在阿杰太阳穴上，并喊‘跑！’"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 30,
+          "Anger": 20,
+          "Fear": 90
+        },
+        "situation": "严峫质问江停是否杀了铆钉",
+        "action": "江停颤栗着回答‘不是我……不是……’并否认"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 80,
+          "Anger": 50,
+          "Fear": 80
+        },
+        "situation": "闻劭在吉普车中攻击江停和严峫",
+        "action": "江停猛打方向盘，将副驾贴向山壁以保护严峫"
+      }
+    ],
+    "distilled_at": "2026-07-06T10:35:40.641532",
+    "confidence": "medium"
+  },
+  "严峫": {
+    "name": "严峫",
+    "voice": {
+      "avg_sentence_length": 29.8,
+      "sentence_range": [2, 108],
+      "exclamation_density": 0.0043,
+      "ellipsis_density": 0.0055,
+      "question_density": 0.0061,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.6,
+        "imperative": 0.1,
+        "interrogative": 0.25,
+        "exclamatory": 0.05
+      },
+      "tone_cold_warm": 0.8,
+      "tone_hard_soft": 0.6,
+      "tone_distant_close": 0.7,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "direct",
+      "rhythm": "initiator",
+      "voice_shift": {
+        "notes": "对江停时亲昵调侃，带笑意；对下属时指令明确、简洁；对领导如吕局时恭敬但自然；对母亲时幽默自嘲。对象不同时句长和语气有明显调整。"
+      },
+      "summary": "风趣幽默，直接果断，带痞气"
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [
+        "在压力下先沉默再谨慎回应",
+        "办案时亲力亲为，深入现场勘察",
+        "在亲密关系中主动表达感情",
+        "与同事幽默互动，调节气氛",
+        "面对长辈保持尊重但直言不讳"
+      ],
+      "relationship_behaviors": {
+        "江停": "主动追求亲密，即使被揍也保持乐观亲近",
+        "魏尧": "面对怀疑时含糊其辞，转移话题隐藏真实想法",
+        "韩小梅": "以领导口吻分配任务，同时关照下属",
+        "严母": "用幽默和玩笑回应母亲的关心，保持轻松互动",
+        "吕局": "在上级面前郑重承诺，展现可靠和负责"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 60,
+        "Fear": 30,
+        "Anger": 20,
+        "Love": 70,
+        "Honor": 80,
+        "Greed": 10,
+        "Patience": 40,
+        "RiskPreference": 75,
+        "Dominance": 50,
+        "Intelligence": 85
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["江停疑似涉毒"],
+          "effects": {
+            "Fear": 80,
+            "Trust": -30
+          },
+          "evidence": [
+            "原文：江停掌心沾满白色粉末，严峫紧抓肩膀后松手虚脱般松了口气"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["黑桃K出现并提及1009爆炸案"],
+          "effects": {
+            "Fear": 40,
+            "Anger": 25
+          },
+          "evidence": [
+            "原文：秦川会走上那条不归路么？严峫觉得他心里比黑桃K多的并不仅仅是一道紧箍咒"
+          ],
+          "confidence": "部分推测"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.1,
+        "Fear": 0.3,
+        "Anger": 0.2,
+        "Love": 0.05,
+        "Honor": 0.0
+      },
+      "triggers": {
+        "Trust": ["虚惊解除后", "江停解释或证明清白"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 30,
+          "Anger": 20,
+          "Fear": 80,
+          "Joy": 10
+        },
+        "situation": "发现江停手上沾满白色粉末疑似毒品，担心其吸毒",
+        "action": "紧抓江停肩膀，随即松手蹲地抱头，虚脱般松了口气"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 90,
+          "Anger": 5,
+          "Fear": 5,
+          "Joy": 85
+        },
+        "situation": "与江停在沙发上亲密互动，开玩笑调侃",
+        "action": "调侃江停后主动亲吻，被江停打了一拳后大笑"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 70,
+          "Anger": 10,
+          "Fear": 40,
+          "Joy": 15
+        },
+        "situation": "绑架案调查中，申父手机突然响起",
+        "action": "下意识摸裤袋，随即觅声望去查看来电显示"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 85,
+          "Anger": 5,
+          "Fear": 30,
+          "Joy": 10
+        },
+        "situation": "吕局询问药酒调查进展，领导在场",
+        "action": "喉结剧烈耸动后低沉回答“没问题”"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 60,
+          "Anger": 5,
+          "Fear": 20,
+          "Joy": 10
+        },
+        "situation": "在废旧居民楼现场勘查，搜寻可疑物",
+        "action": "跪地反手摸索床板背面，摸到胶带贴住的硬物"
+      }
+    ],
+    "distilled_at": "2026-07-06T10:36:34.717682",
+    "confidence": "medium"
+  },
+  "杨媚": {
+    "name": "杨媚",
+    "voice": {
+      "avg_sentence_length": 26.2,
+      "sentence_range": [2, 74],
+      "exclamation_density": 0.0059,
+      "ellipsis_density": 0.0064,
+      "question_density": 0.0066,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.7,
+        "imperative": 0.05,
+        "interrogative": 0.2,
+        "exclamatory": 0.05
+      },
+      "tone_cold_warm": 0.8,
+      "tone_hard_soft": 0.4,
+      "tone_distant_close": 0.8,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "direct",
+      "rhythm": "initiator",
+      "voice_shift": {
+        "notes": "对江停：语气温柔、依赖，常用昵称'江哥'，句子较长且充满关心，如'江哥你上哪去？我跟你一起走！'。对严峫：直接、不服气，常用反问和反驳，如'你你你'、'？？？'。对陌生人/敌人：泼辣、强势，使用粗话如'贱人'、'祖宗十八代'，命令语气。对下属：老练果断，如'小刘'。"
+      },
+      "summary": "泼辣护短，对爱人温柔"
+    },
+    "boundary": {
+      "hard_rules": [
+        "不会抛弃江停",
+        "不会背叛江停",
+        "不会在江停遇到危险时独自逃跑",
+        "不会违抗江停的明确指令"
+      ],
+      "tendencies": [
+        "在江停遇险时不顾一切紧随保护",
+        "在压力下先关心江停安危再管其他",
+        "遇到损失（如钻石）会情绪化",
+        "在KTV经营中善于交际和化解矛盾",
+        "对江停的过去和危险保持忧虑并尝试阻止",
+        "愿意为江停付出包括自身安全",
+        "在江停昏迷时长期精心照顾不离不弃",
+        "在灰色地带游走但依靠江停摆平法律问题"
+      ],
+      "relationship_behaviors": {
+        "江停": "百依百顺，全心照顾，偶尔劝阻但最终服从",
+        "严峫": "保持礼貌但警惕，被调侃时不服气，逐渐信任",
+        "黑桃K": "极度恐惧，视其为巨大威胁",
+        "马翔": "被当作潜在情敌，但保持商业往来",
+        "韩小梅": "关系亲密，共享化妆品等"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 40,
+        "Fear": 70,
+        "Anger": 60,
+        "Love": 85,
+        "Honor": 70,
+        "Greed": 60,
+        "Patience": 50,
+        "RiskPreference": 55,
+        "Dominance": 45,
+        "Intelligence": 65
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["江停遭遇生命威胁或提到黑桃K"],
+          "effects": {
+            "Fear": 0.3,
+            "Love": 0.1
+          },
+          "evidence": [
+            "第1章爆炸剧情中杨媚在车内等待，且之前对话中杨媚说'先是医院又是这次，连坐在警车里他都敢动手'，显示恐惧加剧"
+          ],
+          "confidence": "部分推测"
+        },
+        {
+          "triggers": ["个人财物被损坏或面子受损"],
+          "effects": {
+            "Anger": 0.4,
+            "Greed": -0.1
+          },
+          "evidence": [
+            "钻石被扯掉后杨媚骂'我要回去宰了她祖宗十八代'，并强调钻石是五克拉（实际只有一克拉）"
+          ],
+          "confidence": "原文锚定"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.01,
+        "Fear": 0.15,
+        "Anger": 0.2,
+        "Love": 0.05,
+        "Honor": 0.1,
+        "Greed": 0.05,
+        "Patience": 0.1,
+        "RiskPreference": 0.05,
+        "Dominance": 0.02,
+        "Intelligence": 0.01
+      },
+      "triggers": {
+        "Fear": ["江停平安归来或得到保护"],
+        "Love": ["江停表现出依赖或温情"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 90,
+          "Anger": 10,
+          "Fear": 70,
+          "Sadness": 20,
+          "Anxiety": 60
+        },
+        "situation": "严峫提到丁当交代了，暗示江停有危险，杨媚担忧江停的安全。",
+        "action": "杨媚劝江停放弃追查，说中国那么大哪里都能躲。"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 80,
+          "Anger": 90,
+          "Fear": 10,
+          "Sadness": 30,
+          "Anxiety": 20
+        },
+        "situation": "钻石项链被扯掉，五克拉钻石遗失。",
+        "action": "杨媚捧着项链欲哭无泪，愤怒发誓要回去宰了对方祖宗十八代。"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 100,
+          "Anger": 0,
+          "Fear": 10,
+          "Sadness": 5,
+          "Anxiety": 10
+        },
+        "situation": "江停出院，杨媚办完手续来接他。",
+        "action": "杨媚精心打扮，笑着轻声说手续都办好了，车在楼下，两人走吧。"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 85,
+          "Anger": 20,
+          "Fear": 10,
+          "Sadness": 5,
+          "Anxiety": 30
+        },
+        "situation": "调酒师与客人因酒精度问题发生口角。",
+        "action": "杨媚大步上前笑着圆场，提议重新调酒，并称呼调酒师小刘。"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 95,
+          "Anger": 5,
+          "Fear": 50,
+          "Sadness": 10,
+          "Anxiety": 70
+        },
+        "situation": "江停突然说要去外地，并直接穿鞋出门。",
+        "action": "杨媚惊慌失措跟在后边，一叠声大喊要跟江停一起走。"
+      }
+    ],
+    "distilled_at": "2026-07-06T10:37:24.948197",
+    "confidence": "high"
+  },
+  "冯宇光": {
+    "name": "冯宇光",
+    "voice": {
+      "avg_sentence_length": 32.4,
+      "sentence_range": [2, 114],
+      "exclamation_density": 0.0021,
+      "ellipsis_density": 0.006,
+      "question_density": 0.0071,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.6,
+        "imperative": 0.2,
+        "interrogative": 0.2,
+        "exclamatory": 0.0
+      },
+      "tone_cold_warm": 0.3,
+      "tone_hard_soft": 0.2,
+      "tone_distant_close": 0.2,
+      "taboo_words": [],
+      "taboo_patterns": [],
+      "response_pattern": "direct",
+      "rhythm": "initiator",
+      "voice_shift": {
+        "notes": ""
+      },
+      "summary": "直接挑衅，语气强硬"
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [
+        "主动与室友打赌考博",
+        "因小事指责室友并诬陷对方偷窃",
+        "在争执中先动手但被反制",
+        "服用新型毒品寻求刺激或缓解压力"
+      ],
+      "relationship_behaviors": {
+        "楚慈": "与楚慈打赌考博，因丢失物品诬陷楚慈并引发肢体冲突",
+        "丁当": "频繁通话约会丁当，试图建立恋爱关系"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 40,
+        "Fear": 35,
+        "Anger": 70,
+        "Love": 30,
+        "Honor": 65,
+        "Greed": 50,
+        "Patience": 15,
+        "RiskPreference": 80,
+        "Dominance": 55,
+        "Intelligence": 25
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["与室友发生争执", "被认为有不良行为（偷窃）"],
+          "effects": {
+            "Anger": 0.8,
+            "Trust": -0.7
+          },
+          "evidence": [
+            "丁家旺描述冯宇光因东西丢失硬说是楚慈偷的，争了几句就动手了，被楚慈一脚踹出门"
+          ],
+          "confidence": "原文锚定"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {},
+      "triggers": {}
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 40,
+          "Anger": 20,
+          "Fear": 10
+        },
+        "situation": "冯宇光在宿舍看书，见室友楚慈进来，突然提出打赌",
+        "action": "冯宇光非要与楚慈打一个赌"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 10,
+          "Anger": 80,
+          "Fear": 10
+        },
+        "situation": "冯宇光晚上回宿舍找不到东西，怀疑是楚慈拿的",
+        "action": "冯宇光与楚慈争执并动手，被楚慈一脚踹出门外"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 10,
+          "Anger": 70,
+          "Fear": 20
+        },
+        "situation": "冯宇光服食新型毒品后发狂，从车上下来",
+        "action": "冯宇光因毒品致幻发狂，下车乱跑，同伴拉不住"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 70,
+          "Anger": 10,
+          "Fear": 10
+        },
+        "situation": "冯宇光在建宁实习期间，与带教主任的女儿丁当频繁通话",
+        "action": "冯宇光近一个月来与丁当频繁通话，疑似恋爱"
+      }
+    ],
+    "distilled_at": "2026-07-06T10:38:28.040999",
+    "confidence": "medium"
+  },
+  "楚慈": {
+    "name": "楚慈",
+    "voice": {
+      "avg_sentence_length": 28.7,
+      "sentence_range": [2, 108],
+      "exclamation_density": 0.0037,
+      "ellipsis_density": 0.0074,
+      "question_density": 0.0085,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.7,
+        "imperative": 0.05,
+        "interrogative": 0.2,
+        "exclamatory": 0.05
+      },
+      "tone_cold_warm": 0.3,
+      "tone_hard_soft": 0.4,
+      "tone_distant_close": 0.2,
+      "taboo_words": ["他妈的", "操", "滚"],
+      "taboo_patterns": ["歇斯底里的抱怨", "无逻辑的重复", "夸张的讨好"],
+      "response_pattern": "direct",
+      "rhythm": "responder",
+      "voice_shift": {
+        "notes": "对警察和导师：解释性、冷静、简洁；对绑匪：沉默、冷淡、极少主动开口；对丁当（同伙）：有关切但立即转为警觉，语气短促。"
+      },
+      "summary": "冷静克制，理性简洁，偶有锋芒"
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [],
+      "relationship_behaviors": {}
+    },
+    "state": {
+      "baseline": {
+        "Trust": 30,
+        "Fear": 20,
+        "Anger": 10,
+        "Love": 40,
+        "Honor": 70,
+        "Greed": 10,
+        "Patience": 80,
+        "RiskPreference": 15,
+        "Dominance": 10,
+        "Intelligence": 90
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["被警方怀疑/审问"],
+          "effects": {
+            "Trust": -0.4,
+            "Anger": 0.1,
+            "Fear": 0.3
+          },
+          "evidence": [
+            "原文: '楚慈终于叹了口气，疲惫道：‘上个室友在时，我是没有神经衰弱的。’' 表明他隐瞒信息；'秦川说‘这小子作案动机很完备’’"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["被毒贩挟持/生命威胁"],
+          "effects": {
+            "Fear": 0.6,
+            "Anger": 0.2,
+            "Honor": -0.1
+          },
+          "evidence": [
+            "原文: '楚慈的瞳孔紧压成一线，只觉得后脑枪口使力，就要迫使他跪下。' 表现恐惧；'他垂下眼睫一声不吭，直直站在那里任他审视，面上毫无任何情绪波动' 显示克制"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["科研实验中断/化学物品失窃被栽赃"],
+          "effects": {
+            "Patience": -0.3,
+            "Intelligence": 0.0,
+            "Anger": 0.4
+          },
+          "evidence": [
+            "原文: '楚慈切断电源及监控，偷来门卡，潜入了管制化学品仓库' 但后被证实可能是栽赃；原文'实验方向突然变得很杂乱'"
+          ],
+          "confidence": "部分推测"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.05,
+        "Fear": 0.25,
+        "Anger": 0.1,
+        "Love": 0.02,
+        "Honor": 0.03,
+        "Greed": 0.01,
+        "Patience": 0.1,
+        "RiskPreference": 0.02,
+        "Dominance": 0.01,
+        "Intelligence": 0.01
+      },
+      "triggers": {
+        "Trust": ["警方排除嫌疑后确认清白", "被解救后与丁当互动"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 40,
+          "Anger": 20,
+          "Fear": 30
+        },
+        "situation": "在警察询问时，被问到能否离开去完成重要的甲醇钠催化实验",
+        "action": "上半身前倾俯在桌沿，询问自己何时能走，强调实验不能离人"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 10,
+          "Anger": 10,
+          "Fear": 70
+        },
+        "situation": "被毒贩池瑞等人劫持后，在工厂空地上被上下打量",
+        "action": "垂下眼睫一声不吭，直直站着任其审视，面上无任何情绪波动"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 5,
+          "Anger": 5,
+          "Fear": 90
+        },
+        "situation": "被绑匪用枪指着头，迫使他跪下摆出行刑式枪决姿势",
+        "action": "瞳孔紧压成一线，试图挣扎但未成功"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 30,
+          "Anger": 10,
+          "Fear": 60
+        },
+        "situation": "与丁当一起被关押时，听到门外歹徒交谈和脚步",
+        "action": "将食指竖在嘴唇前示意丁当别说话，随后捂住她的嘴将其拖到身后"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 20,
+          "Anger": 10,
+          "Fear": 30
+        },
+        "situation": "被化工技师劝说加入毒品生意，对方贬低化学专业前途",
+        "action": "淡淡道自己是奥赛拿奖直接保送的化学专业，打断技师的抱怨"
+      }
+    ],
+    "distilled_at": "2026-07-06T10:39:33.812721",
+    "confidence": "medium"
+  },
+  "秦川": {
+    "name": "秦川",
+    "voice": {
+      "avg_sentence_length": 28.7,
+      "sentence_range": [2, 90],
+      "exclamation_density": 0.0045,
+      "ellipsis_density": 0.0086,
+      "question_density": 0.0043,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.6,
+        "imperative": 0.1,
+        "interrogative": 0.15,
+        "exclamatory": 0.15
+      },
+      "tone_cold_warm": 0.6,
+      "tone_hard_soft": 0.4,
+      "tone_distant_close": 0.5,
+      "taboo_words": [],
+      "taboo_patterns": ["不会使用谄媚或过分卑微的语气的"],
+      "response_pattern": "direct",
+      "rhythm": "initiator",
+      "voice_shift": {
+        "notes": "对同事严峫时多用调侃、短句，语气轻松；对嫌疑人江停时则转为冷静、威胁性的长句；对上级方正弘保持尊重但略带无奈。"
+      },
+      "summary": "幽默直爽，偶尔冷静威胁"
+    },
+    "boundary": {
+      "hard_rules": ["不会向敌人求饶", "不会在压力下承认自己有罪"],
+      "tendencies": [
+        "在同事面前幽默幽默、爱八卦",
+        "工作认真甚至站着睡着",
+        "对怀疑对象直接攻击和指控",
+        "在危险中会突然爆发反击",
+        "压力下先沉默再慢悠悠地开口"
+      ],
+      "relationship_behaviors": {
+        "严峫": "作为搭档互相调侃和支持，私下八卦他的私生活",
+        "江停": "初始怀疑并直接对峙指控，后期在合作中保持警惕和敌意",
+        "黑桃K": "表面谨慎佩服，内心可能暗自选择妥协与合作"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 70,
+        "Fear": 20,
+        "Anger": 25,
+        "Love": 40,
+        "Honor": 60,
+        "Greed": 30,
+        "Patience": 50,
+        "RiskPreference": 65,
+        "Dominance": 55,
+        "Intelligence": 85
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["被直接挑衅或威胁"],
+          "effects": {
+            "Anger": 0.6,
+            "Dominance": 0.5
+          },
+          "evidence": [
+            "一脚踹翻茶几，并说'比方说他不敢真把你弄死了，但对我来说却无所谓'"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["涉及自身阴谋或身份暴露"],
+          "effects": {
+            "Fear": 0.5,
+            "Anger": 0.3
+          },
+          "evidence": [
+            "在江停提及方队裤子分析结果时，秦川沉默并揉按眉心，随后微笑反问"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["遇到黑桃K（闻劭）并对话"],
+          "effects": {
+            "Fear": 0.4,
+            "Love": -0.3,
+            "Intelligence": 0.2
+          },
+          "evidence": [
+            "秦川说'幸亏我当警察这些年来从没跟你交过手'，显示对黑桃K的忌惮"
+          ],
+          "confidence": "原文锚定"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.05,
+        "Fear": 0.2,
+        "Anger": 0.15,
+        "Love": 0.03,
+        "Honor": 0.1
+      },
+      "triggers": {
+        "Trust": ["与同事协作办案后的自然缓和", "证明自身清白的事件"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 80,
+          "Anger": 5,
+          "Fear": 5
+        },
+        "situation": "秦川与严峫在夜店，严峫调戏女酒保",
+        "action": "秦川笑着调侃严峫占便宜"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 70,
+          "Anger": 5,
+          "Fear": 5
+        },
+        "situation": "秦川和高盼青在办公室偷看严峫的奔驰G65",
+        "action": "秦川兴奋地凑上前，眼镜被挤歪仍持续观察"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 60,
+          "Anger": 10,
+          "Fear": 5
+        },
+        "situation": "秦川被方正弘指责未还药酒瓶",
+        "action": "秦川无奈地摇头，放回药酒瓶并准备下班"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 10,
+          "Anger": 80,
+          "Fear": 10
+        },
+        "situation": "江停质疑秦川时，秦川摘下眼镜揉眉心",
+        "action": "秦川突然踹翻茶几，显露出攻击性"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 20,
+          "Anger": 60,
+          "Fear": 20
+        },
+        "situation": "在追击中，阿杰要逃跑",
+        "action": "秦川不顾伤势扑上去从后勒住阿杰"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 50,
+          "Anger": 10,
+          "Fear": 30
+        },
+        "situation": "秦川与黑桃K对话后，意识到从未正面交手",
+        "action": "秦川揉按额角，无奈笑叹幸好没交过手"
+      }
+    ],
+    "distilled_at": "2026-07-06T10:40:20.877531",
+    "confidence": "high"
+  },
+  "魏尧": {
+    "name": "魏尧",
+    "voice": {
+      "avg_sentence_length": 27.4,
+      "sentence_range": [2, 102],
+      "exclamation_density": 0.0091,
+      "ellipsis_density": 0.0035,
+      "question_density": 0.0086,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.65,
+        "imperative": 0.15,
+        "interrogative": 0.15,
+        "exclamatory": 0.05
+      },
+      "tone_cold_warm": 0.55,
+      "tone_hard_soft": 0.35,
+      "tone_distant_close": 0.65,
+      "taboo_words": [],
+      "taboo_patterns": ["绝不使用网络流行语或过度口语化的表达"],
+      "response_pattern": "direct",
+      "rhythm": "initiator",
+      "voice_shift": {
+        "notes": "对下属严峫：多用感叹句和命令式，语气直接甚至带火气；对同僚/上级：陈述句为主，语气严肃克制；私下慰问时：语气明显软化，用词亲切（如‘兔崽子’、问鱼汤）。"
+      },
+      "summary": "严厉外露但内含关怀的领导"
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [
+        "批评下属违规行为（如用口令上内网、着装不当、私自娱乐）",
+        "在案情讨论中保持严肃和权威",
+        "关心下属个人状况（如送果篮、询问恢复）",
+        "提供历史案件信息（如江停之死的详情）",
+        "支持案件侦破工作（如批准继续调查）",
+        "在上级面前维护市局自主权（如与省厅专家协调）"
+      ],
+      "relationship_behaviors": {
+        "严峫": "既严厉批评其不守纪律又暗含信任与关心，常训斥但也会提供支持和机会",
+        "江停": "对江停的死因有复杂看法，倾向于怀疑但未公开定论，会分享内部信息",
+        "吕局": "尊重并配合正职领导，在会议上协调立场，保持组织层级意识"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 70,
+        "Fear": 30,
+        "Anger": 40,
+        "Love": 65,
+        "Honor": 75,
+        "Greed": 20,
+        "Patience": 50,
+        "RiskPreference": 30,
+        "Dominance": 60,
+        "Intelligence": 70
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["下属违反纪律（如擅自使用内网、着装不当）"],
+          "effects": {
+            "Anger": 0.6,
+            "Trust": -0.3
+          },
+          "evidence": [
+            "'你又用我的口令上内网！这是违反纪律的你知不知道？！'",
+            "'看看你那着装！表！鞋！头发！你是来上班还是来走秀的'"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["下属展现专业能力或提出关键推理"],
+          "effects": {
+            "Anger": -0.5,
+            "Trust": 0.4
+          },
+          "evidence": [
+            "'随着他平稳有力的声调，魏尧的恼火被压了下来，渐渐陷入了思考'"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["下属受伤或需要关心"],
+          "effects": {
+            "Love": 0.3,
+            "Anger": -0.2
+          },
+          "evidence": [
+            "'兔崽子。'魏尧温柔可亲地接完了后几个字，'送果篮'，'怎么样啊恢复得'"
+          ],
+          "confidence": "原文锚定"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.15,
+        "Fear": 0.1,
+        "Anger": 0.2,
+        "Love": 0.05,
+        "Honor": 0.05
+      },
+      "triggers": {
+        "Trust": ["下属主动纠正错误或取得办案进展"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Trust": 80,
+          "Anger": 10,
+          "Fear": 10
+        },
+        "situation": "会议室里，严峫指出嫌疑人可能故意泄露消息",
+        "action": "魏尧严肃赞同，并指出叛徒可能就是嫌疑人"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 20,
+          "Anger": 90,
+          "Fear": 10
+        },
+        "situation": "发现严峫用自己口令上内网，违规行为被当场揭穿",
+        "action": "魏尧愤怒训斥严峫的着装、手表、头发和违规行为"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 60,
+          "Anger": 30,
+          "Fear": 20
+        },
+        "situation": "严峫追问江停的死因和案件细节",
+        "action": "魏尧从恼火转为思考，坐下来详细解释爆炸案和卧底疑点"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 85,
+          "Anger": 5,
+          "Fear": 5
+        },
+        "situation": "严峫住院期间，魏尧带着果篮探望",
+        "action": "魏尧放下果篮，关心严峫恢复情况并问候其父母"
+      },
+      {
+        "state_snapshot": {
+          "Trust": 75,
+          "Anger": 10,
+          "Fear": 15
+        },
+        "situation": "病房中讨论胡伟胜案件进展",
+        "action": "魏尧站起身严肃指示必须查清毒品源头和全网，不放过任何机会"
+      }
+    ],
+    "distilled_at": "2026-07-06T10:41:01.618029",
+    "confidence": "medium"
+  },
+  "胡伟胜": {
+    "name": "胡伟胜",
+    "voice": {
+      "avg_sentence_length": 32.6,
+      "sentence_range": [2, 110],
+      "exclamation_density": 0.0038,
+      "ellipsis_density": 0.007,
+      "question_density": 0.0045,
+      "first_person": "我",
+      "sentence_types": {
+        "declarative": 0.5,
+        "imperative": 0.0,
+        "interrogative": 0.2,
+        "exclamatory": 0.3
+      },
+      "tone_cold_warm": 0.8,
+      "tone_hard_soft": 0.3,
+      "tone_distant_close": 0.2,
+      "taboo_words": ["对不起", "谢谢", "请"],
+      "taboo_patterns": ["乞求语气", "低声下气"],
+      "response_pattern": "direct",
+      "rhythm": "responder",
+      "voice_shift": {
+        "notes": "仅与警察对话，表现出从激动到冷静的转变，但未观察到对不同对象的表达差异"
+      },
+      "summary": "激动否认，威胁，苦涩自嘲"
+    },
+    "boundary": {
+      "hard_rules": [],
+      "tendencies": [
+        "在审讯中先激烈否认和表现愤怒，但在明确威胁或利益面前最终选择妥协招供",
+        "利用毒品或迷药对弱势群体实施犯罪，如诱骗刘雪下药",
+        "为求自保，愿意出卖同伙信息，如差点供出‘三春花树’",
+        "对警方的调查进展保持警惕，但未能完全逃脱灭口命运"
+      ],
+      "relationship_behaviors": {
+        "严峫": "在审讯中起初否认，但最终在严峫的威吓下妥协，开始招供同伙",
+        "丁当": "与丁当合谋犯罪，利用其作为帮凶，并藏匿毒品样本",
+        "刁勇": "与刁勇关系密切，但被灭口后刁勇供出胡伟胜的同伙信息",
+        "冯宇光": "向冯宇光出售假聪明药，间接导致其死亡"
+      }
+    },
+    "state": {
+      "baseline": {
+        "Trust": 15,
+        "Fear": 80,
+        "Anger": 50,
+        "Love": 5,
+        "Honor": 10,
+        "Greed": 70,
+        "Patience": 40,
+        "RiskPreference": 65,
+        "Dominance": 20,
+        "Intelligence": 55
+      }
+    },
+    "sensitivity": {
+      "entries": [
+        {
+          "triggers": ["警察提及同谋已死并暗示配合有利"],
+          "effects": {
+            "Fear": -0.2,
+            "Trust": 0.15,
+            "Anger": -0.15
+          },
+          "evidence": [
+            "胡伟胜在被严峫说'好在你的同谋已经死了'后，奇异般镇定下来并接过烟（原文：'胡伟胜奇异般镇定下来，吼道……胡伟胜久久凝视那根烟……抬手把烟接了过来'）"
+          ],
+          "confidence": "部分推测"
+        },
+        {
+          "triggers": ["警察出示血腥现场照片或提及关键地点"],
+          "effects": {
+            "Fear": 0.3,
+            "Patience": -0.1,
+            "RiskPreference": -0.2
+          },
+          "evidence": [
+            "胡伟胜下意识望向现场照片，说出'颐和路‘三春花树’’，随即意识到并停住（原文：'胡伟胜下意识望向严峫面前那张血腥的现场照片：“颐和路‘三春花树’，他们说新货都是从……”突然他停住了。'）"
+          ],
+          "confidence": "原文锚定"
+        },
+        {
+          "triggers": ["提及恭州旧案可能被翻出"],
+          "effects": {
+            "Fear": 0.5,
+            "Trust": -0.3
+          },
+          "evidence": [
+            "胡伟胜说'如果恭州那个案子再被翻出来，我得被人弄死在看守所里'（原文）"
+          ],
+          "confidence": "原文锚定"
+        }
+      ]
+    },
+    "recovery": {
+      "rates": {
+        "Trust": 0.01,
+        "Fear": 0.25,
+        "Anger": 0.1,
+        "Love": 0.0,
+        "Honor": 0.05
+      },
+      "triggers": {
+        "Trust": ["获得短期安全承诺或合作机会"]
+      }
+    },
+    "policy_anchors": [
+      {
+        "state_snapshot": {
+          "Fear": 60,
+          "Anger": 40,
+          "Greed": 20
+        },
+        "situation": "审讯室内，严峫出示照片并递烟",
+        "action": "胡伟胜从激烈挣扎到冷静下来，接过烟"
+      },
+      {
+        "state_snapshot": {
+          "Fear": 30,
+          "Anger": 0,
+          "Greed": 90
+        },
+        "situation": "遇到因考试压力闲逛的刘雪",
+        "action": "歹心顿起，诱骗刘雪至车内下药"
+      },
+      {
+        "state_snapshot": {
+          "Fear": 80,
+          "Anger": 10,
+          "Greed": 20
+        },
+        "situation": "审讯过程中看到血腥现场照片，下意识回应",
+        "action": "说漏嘴提到‘三春花树’，然后突然停住"
+      },
+      {
+        "state_snapshot": {
+          "Fear": 90,
+          "Anger": 20,
+          "Greed": 10
+        },
+        "situation": "审讯中被问及恭州旧案",
+        "action": "发出苦涩讽刺的笑声，表达会被灭口的担忧"
+      }
+    ],
+    "distilled_at": "2026-07-06T10:42:18.925885",
+    "confidence": "medium"
+  }
+}

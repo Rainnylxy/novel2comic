@@ -9,17 +9,20 @@
           "name": "lookup_character",
           "args": {
             "name": "韩平"
-          }
+          },
+          "output": "角色: 韩平\n状态: active\n叙事角色: protagonist\n重要性: 9\n所属: 中国某医院脑外科\n身份: 医院脑外科医生，主攻脑干，日本高材生，有八分之一日本血统，在甲府长大；性格礼貌、"
         },
         {
           "name": "lookup_character",
           "args": {
             "name": "Cindy"
-          }
+          },
+          "output": "角色: Cindy\n状态: active\n叙事角色: protagonist\n重要性: 8\n所属: 人民路人妖俱乐部 / 健身房\n身份: 人妖俱乐部‘妹妹’，本名可能为吴教练；高个子，长卷发，几近素颜"
         },
         {
           "name": "recall_foreshadowing",
-          "args": {}
+          "args": {},
+          "output": "共 6 条活跃伏笔:\n- [2] 侯院长对韩平Cindy关系的察觉与打压\n- [2] Cindy的性别确认手术之路\n- [2] 韩平职业身份与私人情感的对立\n- [2] 俱乐部-医院-健身房三界的冲突"
         }
       ]
     },
