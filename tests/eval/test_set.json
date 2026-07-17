@@ -1,0 +1,59 @@
+{
+  "test_set": "v1",
+  "description": "续写质量评估测试集 —— 用小说前N章建KG，续写M章，评估一致性+质量",
+  "created": "2026-07-17",
+  "config": {
+    "kg_chapters": 5,
+    "continuation_chapters": 3,
+    "judge_model": "deepseek-v4-flash",
+    "dimensions": [
+      "character_consistency",
+      "setting_consistency",
+      "style_consistency",
+      "plot_coherence",
+      "writing_quality"
+    ]
+  },
+  "cases": [
+    {
+      "id": "poyun-5-3",
+      "novel": "novels/poyun.txt",
+      "encoding": "utf-16",
+      "genre": "刑侦推理",
+      "kg_chapters": 5,
+      "continuation_chapters": 3,
+      "skip": false,
+      "notes": ""
+    },
+    {
+      "id": "modaozushi-5-3",
+      "novel": "novels/modaozushi.txt",
+      "encoding": "utf-8",
+      "genre": "古装仙侠",
+      "kg_chapters": 5,
+      "continuation_chapters": 3,
+      "skip": false,
+      "notes": ""
+    },
+    {
+      "id": "yangfu-5-3",
+      "novel": "novels/yangfu.txt",
+      "encoding": "utf-16",
+      "genre": "都市/职场",
+      "kg_chapters": 5,
+      "continuation_chapters": 3,
+      "skip": false,
+      "notes": ""
+    },
+    {
+      "id": "langxingchengshuang-5-3",
+      "novel": "novels/langxingchengshuang.txt",
+      "encoding": "utf-16",
+      "genre": "都市",
+      "kg_chapters": 5,
+      "continuation_chapters": 3,
+      "skip": false,
+      "notes": ""
+    }
+  ]
+}
