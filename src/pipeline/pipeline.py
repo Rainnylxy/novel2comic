@@ -1073,6 +1073,32 @@ class ContinuationPipeline:
         except Exception:
             pass
 
+        # TXT 落盘：便于读者直接阅读
+        txt_path = os.path.join(project_dir, f"chapter_{chapter_number:04d}.txt")
+        try:
+            title = chapter_plan.get("title", f"第{chapter_number}章")
+            lines = [f"第{chapter_number}章 {title}", ""]
+            for frag in revised_fragments:
+                t = frag.get("type", "narration")
+                text = frag.get("text", "")
+                char = frag.get("character")
+                if t == "dialogue" and char:
+                    lines.append(f"{char}：「{text}」")
+                elif t == "inner_thought" and char:
+                    lines.append(f"（{char}心想：{text}）")
+                elif t == "action" and char:
+                    lines.append(f"（{char}{text}）")
+                elif t == "divider":
+                    label = frag.get("divider_label", "")
+                    lines.append(f"\n  --- {label} ---\n" if label else "\n  ---\n")
+                else:
+                    lines.append(text)
+                lines.append("")
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+        except Exception:
+            pass
+
     # ================================================================
     # Session 恢复：扫描已生成章节并从断点继续
     # ================================================================
