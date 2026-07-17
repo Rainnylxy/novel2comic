@@ -239,9 +239,9 @@ class CharacterDistiller:
             try:
                 profile = self.distill_character(name, novel_text, graph)
                 profiles[name] = profile
-                print(f"✓ (confidence={profile.confidence})")
+                print(f"[OK] (confidence={profile.confidence})")
             except Exception as e:
-                print(f"✗ ({e})")
+                print(f"[FAIL] ({e})")
                 # 继续处理其他角色
 
         print(f"  [Distill] 完成: {len(profiles)}/{len(targets)} 个角色蒸馏成功")

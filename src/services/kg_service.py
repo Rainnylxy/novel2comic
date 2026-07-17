@@ -97,9 +97,9 @@ class KnowledgeGraphService:
                         batch_text, openai_client=client, model=model,
                     )
                     graph = self._merge_graphs(graph, partial)
-                    print(f"✓ ({partial.total_node_count} 节点)")
+                    print(f"[OK] ({partial.total_node_count} 节点)")
                 except Exception as e:
-                    print(f"✗ ({e})")
+                    print(f"[FAIL] ({e})")
             else:
                 # 后续批次：增量更新
                 print(f"{progress} 增量更新...", end=" ", flush=True)
@@ -111,9 +111,9 @@ class KnowledgeGraphService:
                         openai_client=client, model=model,
                     )
                     added = graph.total_node_count - before
-                    print(f"✓ (+{added} 节点)")
+                    print(f"[OK] (+{added} 节点)")
                 except Exception as e:
-                    print(f"✗ ({e})")
+                    print(f"[FAIL] ({e})")
 
             # 每批后打印当前 KG 摘要
             if graph.person_nodes:
