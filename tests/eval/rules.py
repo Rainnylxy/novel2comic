@@ -137,12 +137,126 @@ def calc_target_deviation(actual: int, target: int) -> float:
 # 汇总
 # ================================================================
 
+# ================================================================
+# 6. 工具调用效率 check
+# ================================================================
+
+def _extract_tool_calls(traces: list) -> list[dict]:
+    """从 trace 列表中提取所有 tool_calls。
+
+    trace 格式:
+      {"agent": "plot_architect", "turns": [{"turn": 1, "tool_calls": [
+        {"name": "lookup_roadmap", "args": {}, "output": "..."}]}]}
+    """
+    calls = []
+    for trace in traces:
+        agent = trace.get("agent", "?")
+        for turn in trace.get("turns", []):
+            for tc in turn.get("tool_calls", []):
+                calls.append({
+                    "agent": agent,
+                    "turn": turn.get("turn", 0),
+                    "tool": tc.get("name", "?"),
+                    "args": tc.get("args", {}),
+                    "output": (tc.get("output", "") or "")[:200],
+                })
+    return calls
+
+
+def check_redundant_calls(traces: list) -> list[dict]:
+    """检查同一 Agent 对同一角色重复调用 lookup_character。
+
+    同一个角色在同一次 trace 中查询超过 1 次 → 冗余。
+    """
+    calls = _extract_tool_calls(traces)
+    seen = {}  # {(agent, tool, char): [call_indices]}
+    violations = []
+
+    for i, call in enumerate(calls):
+        if call["tool"] != "lookup_character":
+            continue
+        char = call["args"].get("name", "")
+        if not char:
+            continue
+        key = (call["agent"], call["tool"], char)
+        if key not in seen:
+            seen[key] = []
+        seen[key].append(i)
+
+    for (agent, tool, char), indices in seen.items():
+        if len(indices) > 1:
+            violations.append({
+                "type": "redundant_lookup",
+                "detail": f"[{agent}] 重复查询 '{char}' {len(indices)} 次"
+                          f" (turns: {[calls[i]['turn'] for i in indices]})",
+            })
+
+    return violations
+
+
+def check_missed_lookup(traces: list, fragments: list,
+                        preloaded_chars: set) -> list[dict]:
+    """检查 Writer 是否写了未预加载且未 lookup 的角色。
+
+    preloaded_chars: chapter_plan 中声明的角色，Writer 已知无需查。
+    """
+    calls = _extract_tool_calls(traces)
+
+    # 收集实际查过的角色
+    looked_up = set()
+    for call in calls:
+        if call["tool"] == "lookup_character":
+            char = call["args"].get("name", "")
+            if char:
+                looked_up.add(char)
+
+    # 收集续写中出场的角色
+    appeared = set()
+    for f in fragments:
+        char = f.get("character", "")
+        if char:
+            appeared.add(char)
+
+    # 出场但没预加载也没查 = 脑补
+    known = preloaded_chars | looked_up
+    violations = []
+    for char in sorted(appeared - known):
+        violations.append({
+            "type": "missed_lookup",
+            "detail": f"角色 '{char}' 出场但未预加载也未调用 lookup_character（可能脑补）",
+        })
+
+    return violations
+
+
+def check_unnecessary_tools(traces: list, agent: str,
+                             unnecessary: list) -> list[dict]:
+    """检查是否调用了不必要的工具。
+
+    Args:
+        agent: 限定检查的 Agent 名（如 "chapter_writer"）
+        unnecessary: 该 Agent 不应调用的工具名列表
+    """
+    calls = _extract_tool_calls(traces)
+    violations = []
+    for call in calls:
+        if call["agent"] == agent and call["tool"] in unnecessary:
+            violations.append({
+                "type": "unnecessary_tool",
+                "detail": f"[{agent}] 调用了不必要的工具 '{call['tool']}'"
+                          f" @ turn {call['turn']}",
+            })
+    return violations
+
+
 def run_rule_checks(
     fragments: list,
     character_profiles: Optional[dict] = None,
     dead_chars: Optional[set] = None,
     missing_chars: Optional[set] = None,
     target_fragments: int = 0,
+    traces: Optional[list] = None,
+    preloaded_chars: Optional[set] = None,
 ) -> dict:
     """运行所有规则检查，返回结构化结果。
 
@@ -152,10 +266,13 @@ def run_rule_checks(
         dead_chars: 已知已死亡的角色名集合
         missing_chars: 已知下落不明的角色名集合
         target_fragments: 目标片段数
+        traces: 已解析的 Agent trace 列表（用于工具效率检查）
+        preloaded_chars: 已预加载的角色名集合（来自 chapter_plan）
 
     Returns:
         {
             "violations": [...],
+            "tool_efficiency": {...},
             "stats": {"syntax": {...}, "distribution": {...}, ...},
             "evidence_text": "格式化文本，可注入 Judge prompt"
         }
@@ -180,6 +297,34 @@ def run_rule_checks(
     taboo_violations = check_taboo_words(fragments, taboo_map)
     violations.extend(taboo_violations)
 
+    # 工具调用效率
+    tool_efficiency = {}
+    if traces:
+        redundant = check_redundant_calls(traces)
+        violations.extend(redundant)
+
+        missed = check_missed_lookup(
+            traces, fragments,
+            preloaded_chars or set(),
+        )
+        violations.extend(missed)
+
+        # Writer 不应调用 Architect 的专属工具
+        unnecessary = check_unnecessary_tools(
+            traces, "chapter_writer",
+            ["lookup_roadmap", "update_roadmap", "verify_character",
+             "gather_active_conflicts"],
+        )
+        violations.extend(unnecessary)
+
+        total_calls = len(_extract_tool_calls(traces))
+        tool_efficiency = {
+            "total_tool_calls": total_calls,
+            "redundant_count": len(redundant),
+            "missed_lookup_count": len(missed),
+            "unnecessary_count": len(unnecessary),
+        }
+
     # 统计
     text = _fragments_to_plain_text(fragments)
     syntax = calc_syntax_stats(text)
@@ -191,6 +336,8 @@ def run_rule_checks(
         "fragment_count": len(fragments),
         "target_deviation": calc_target_deviation(len(fragments), target_fragments),
     }
+    if tool_efficiency:
+        stats["tool_efficiency"] = tool_efficiency
 
     # 构建 evidence text
     evidence = _build_evidence_text(violations, stats)
@@ -230,5 +377,13 @@ def _build_evidence_text(violations: list, stats: dict) -> str:
     parts.append(f"- 平均句长: {s['syntax']['avg_sentence_length']}字")
     parts.append(f"- 总句数: {s['syntax']['sentence_count']}")
     parts.append(f"- 片段类型分布: {s['distribution']}")
+
+    te = s.get("tool_efficiency")
+    if te:
+        parts.append(f"\n### 工具调用效率")
+        parts.append(f"- 总调用次数: {te.get('total_tool_calls', 0)}")
+        parts.append(f"- 冗余调用: {te.get('redundant_count', 0)}")
+        parts.append(f"- 漏查角色: {te.get('missed_lookup_count', 0)}")
+        parts.append(f"- 不必要调用: {te.get('unnecessary_count', 0)}")
 
     return "\n".join(parts)

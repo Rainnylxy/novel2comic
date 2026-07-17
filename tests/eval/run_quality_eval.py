@@ -241,8 +241,19 @@ async def run_case(case: dict) -> dict:
         shutil.rmtree(tmpdir, ignore_errors=True)
         return {"case_id": case_id, "error": "No chapters generated", "verdicts": []}
 
+    # ── 3.5 解析 Agent trace（供工具效率检查）──
+    from tests.eval.collect_fixtures import parse_agent_trace_log
+
+    trace_log_path = os.path.join(ROOT_DIR, "agent_trace.log")
+    all_traces = parse_agent_trace_log(trace_log_path) if os.path.exists(trace_log_path) else []
+
+    # 只保留本次续写产生的 trace（按时间截取：最近 N 条）
+    writer_traces = [t for t in all_traces if "writer" in t.get("agent", "").lower()]
+    if len(writer_traces) > num_chapters * 4:
+        writer_traces = writer_traces[-num_chapters * 4:]
+
     # ── 4. LLM Judge 评分 ──
-    print(f"\n[4/4] LLM Judge 评分...")
+    print(f"\n[4/4] LLM Judge 评分 (trace: {len(writer_traces)} 条 Writer)...")
     judge = QualityJudge(llm)
 
     # 提取非活跃角色（供规则检测用）
@@ -263,6 +274,18 @@ async def run_case(case: dict) -> dict:
         fragments = ch_data.get("revised_fragments", [])
         generated_text = fragments_to_text(fragments)
 
+        # 提取本章预加载的角色
+        preloaded = set()
+        chapter_plan = ch_data  # complete event 中包含 chapter plan 字段
+        for s in chapter_plan.get("sections", []):
+            for c in s.get("characters", []):
+                preloaded.add(c)
+        for c in chapter_plan.get("character_beats", {}).keys():
+            preloaded.add(c)
+
+        # 匹配本章的 Writer trace
+        ch_traces = writer_traces[:num_chapters] if writer_traces else []
+
         # 规则检测
         rule_result = run_rule_checks(
             fragments,
@@ -270,6 +293,8 @@ async def run_case(case: dict) -> dict:
             dead_chars=dead_chars,
             missing_chars=missing_chars,
             target_fragments=ch_data.get("fragment_count", 0),
+            traces=ch_traces,
+            preloaded_chars=preloaded,
         )
         evidence = rule_result["evidence_text"]
         violations = rule_result["violations"]
