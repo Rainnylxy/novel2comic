@@ -206,18 +206,23 @@ async def run_case(case: dict) -> dict:
     print(f"\n[3/4] 运行续写 {num_chapters} 章...")
     chapter_outputs = []
 
-    async for event in pipeline.run(
-        instruction=f"请从第{pipeline.chapter + 1}章开始续写",
-        auto_loop=(num_chapters > 1),
-    ):
-        if event.event_type == "phase":
-            print(f"  → {event.data.get('phase', '?')}")
-        elif event.event_type == "complete":
-            ch = event.data.get("chapter", "?")
-            title = event.data.get("title", "")
-            frags = len(event.data.get("revised_fragments", []))
-            chapter_outputs.append(event.data)
-            print(f"  ✓ 第{ch}章「{title}」: {frags} 片段")
+    try:
+        async for event in pipeline.run(
+            instruction=f"请从第{pipeline.chapter + 1}章开始续写",
+            auto_loop=(num_chapters > 1),
+        ):
+            if event.event_type == "phase":
+                print(f"  → {event.data.get('phase', '?')}")
+            elif event.event_type == "complete":
+                ch = event.data.get("chapter", "?")
+                title = event.data.get("title", "")
+                frags = len(event.data.get("revised_fragments", []))
+                chapter_outputs.append(event.data)
+                print(f"  [OK] 第{ch}章「{title}」: {frags} 片段")
+            elif event.event_type == "error":
+                print(f"  [ERR] {event.data.get('message', '?')}")
+    except Exception as e:
+        print(f"  Pipeline 运行失败: {e}")
 
     print(f"  生成 {len(chapter_outputs)} 章")
 
