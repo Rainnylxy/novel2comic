@@ -157,6 +157,7 @@ async def run_case(case: dict) -> dict:
     """
     from src.pipeline.pipeline import ContinuationPipeline
     from tests.eval.judge import QualityJudge, fragments_to_text
+    from tests.eval.rules import run_rule_checks
 
     case_id = case["id"]
     novel = case["novel"]
@@ -244,6 +245,17 @@ async def run_case(case: dict) -> dict:
     print(f"\n[4/4] LLM Judge 评分...")
     judge = QualityJudge(llm)
 
+    # 提取非活跃角色（供规则检测用）
+    dead_chars = set()
+    missing_chars = set()
+    if pipeline._story_memory:
+        for name, s in pipeline._story_memory.character_states.items():
+            status = s.get("status", "")
+            if status in ("dead", "deceased", "killed"):
+                dead_chars.add(name)
+            elif status == "missing":
+                missing_chars.add(name)
+
     verdicts = []
     for ch_data in chapter_outputs:
         ch_num = ch_data.get("chapter", "?")
@@ -251,10 +263,24 @@ async def run_case(case: dict) -> dict:
         fragments = ch_data.get("revised_fragments", [])
         generated_text = fragments_to_text(fragments)
 
-        print(f"  → 评估第{ch_num}章「{ch_title}」({len(fragments)} 片段)...")
+        # 规则检测
+        rule_result = run_rule_checks(
+            fragments,
+            character_profiles=character_profiles,
+            dead_chars=dead_chars,
+            missing_chars=missing_chars,
+            target_fragments=ch_data.get("fragment_count", 0),
+        )
+        evidence = rule_result["evidence_text"]
+        violations = rule_result["violations"]
+        stats = rule_result["stats"]
+
+        print(f"  → 评估第{ch_num}章「{ch_title}」({len(fragments)} 片段)"
+              f" | 规则违规: {len(violations)}")
         result = judge.evaluate(source_text, generated_text, genre,
                                 style_profile=style_profile,
-                                character_profiles=character_profiles)
+                                character_profiles=character_profiles,
+                                evidence_text=evidence)
 
         verdict = {
             "case_id": case_id,
@@ -262,6 +288,8 @@ async def run_case(case: dict) -> dict:
             "title": ch_title,
             "genre": genre,
             "fragment_count": len(fragments),
+            "rule_violations": violations,
+            "rule_stats": stats,
             **result,
         }
         verdicts.append(verdict)

@@ -153,6 +153,7 @@ def build_judge_prompt(source_text: str, generated_text: str,
                         genre: str = "",
                         style_profile=None,
                         character_profiles: dict = None,
+                        evidence_text: str = "",
                         max_source: int = 2000,
                         max_generated: int = 4000) -> str:
     """构建 judge prompt。
@@ -163,6 +164,7 @@ def build_judge_prompt(source_text: str, generated_text: str,
         genre: 小说类型
         style_profile: AuthorStyleProfile 蒸馏档案
         character_profiles: {name: CharacterProfile} 蒸馏档案
+        evidence_text: 规则检测出的客观证据文本
         max_source: 原文最大输入长度
         max_generated: 续写最大输入长度
 
@@ -189,13 +191,18 @@ def build_judge_prompt(source_text: str, generated_text: str,
         parts.append(char_ref)
         parts.append("")
 
+    # 注入规则检测证据
+    if evidence_text:
+        parts.append(evidence_text)
+        parts.append("")
+
     parts.extend([
         "---",
         "",
         "## 续写内容",
         f"{generated_text[:max_generated]}",
         "",
-        "请根据原文前文和参考标准评估此续写的质量，按评分标准逐维度打分。",
+        "请根据原文前文、参考标准和规则检测结果评估此续写的质量，按评分标准逐维度打分。",
     ])
 
     return "\n".join(parts)
@@ -253,7 +260,8 @@ class QualityJudge:
 
     def evaluate(self, source_text: str, generated_text: str,
                  genre: str = "", style_profile=None,
-                 character_profiles: dict = None) -> dict:
+                 character_profiles: dict = None,
+                 evidence_text: str = "") -> dict:
         """运行评估。
 
         Args:
@@ -262,6 +270,7 @@ class QualityJudge:
             genre: 小说类型
             style_profile: AuthorStyleProfile 蒸馏档案
             character_profiles: {name: CharacterProfile}
+            evidence_text: 规则检测证据文本
 
         Returns:
             评估结果 dict，含 scores / overall / summary
@@ -270,6 +279,7 @@ class QualityJudge:
             source_text, generated_text, genre,
             style_profile=style_profile,
             character_profiles=character_profiles,
+            evidence_text=evidence_text,
         )
 
         try:
