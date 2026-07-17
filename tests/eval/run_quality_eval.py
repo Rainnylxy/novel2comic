@@ -196,6 +196,15 @@ async def run_case(case: dict) -> dict:
     try:
         pipeline.load_novel(tmp_novel)
         print(f"  原文章数: {pipeline.chapter}")
+
+        # 提取蒸馏档案（作为 judge 参考标准）
+        style_profile = pipeline._style_profile
+        character_profiles = pipeline._character_profiles
+        if style_profile:
+            print(f"  文风档案: 已蒸馏")
+        if character_profiles:
+            print(f"  角色档案: {len(character_profiles)} 个")
+
     except Exception as e:
         print(f"  Pipeline 初始化失败: {e}")
         import shutil
@@ -243,7 +252,9 @@ async def run_case(case: dict) -> dict:
         generated_text = fragments_to_text(fragments)
 
         print(f"  → 评估第{ch_num}章「{ch_title}」({len(fragments)} 片段)...")
-        result = judge.evaluate(source_text, generated_text, genre)
+        result = judge.evaluate(source_text, generated_text, genre,
+                                style_profile=style_profile,
+                                character_profiles=character_profiles)
 
         verdict = {
             "case_id": case_id,
