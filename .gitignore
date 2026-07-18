@@ -8,3 +8,4 @@ agent_trace.log
 .claude
 CLAUDE.md
 *.md
+create_by_skill/
