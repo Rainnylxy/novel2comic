@@ -3,7 +3,7 @@
 
 import json
 import re
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..pipeline.narrative_card import ChapterNarrativeCard, BatchNarrativeSummary
@@ -52,7 +52,7 @@ class NarrativeDistiller:
     # 批级分析
     # ================================================================
 
-    def analyze_batch(self, chapter_prose_list: list[tuple[int, str]]) -> list:
+    def analyze_batch(self, chapter_prose_list: list[tuple[int, str]]) -> tuple[list, "BatchNarrativeSummary"]:
         """分析续写产出的 10 章批次，返回 [ChapterNarrativeCard, BatchNarrativeSummary]。
 
         Args:
@@ -176,7 +176,6 @@ class NarrativeDistiller:
     @staticmethod
     def _parse_cards(raw: str, card_class) -> list:
         """从 LLM 输出中解析叙事卡 JSON 数组。"""
-        import re
 
         # 尝试直接解析
         text = raw.strip()
@@ -244,6 +243,8 @@ class NarrativeDistiller:
 
     @staticmethod
     def _parse_chapter_number(title: str) -> int:
+        # 节号解析（与 pipeline.py 中 ContinuationPipeline._parse_chapter_number 同源）
+        # 仅可靠处理阿拉伯数字章节号；中文数字（十二/二十）存在已知偏差
         """从 '第X章' 中解析章节号。"""
         m = re.search(r'第\s*(\d+)\s*章', title)
         if m:

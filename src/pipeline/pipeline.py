@@ -684,7 +684,7 @@ class ContinuationPipeline:
             sections = chapter.get("sections", [])
             if not sections:
                 sections = [{"name": "main", "goal": chapter.get("synopsis", ""),
-                             "characters": [], "key_beats": [], "target_paragraphs": 20}]
+                             "characters": [], "key_beats": [], "target_fragments": 20}]
 
             print(f"[第{chapter_count}章] Phase 2/3 — 写作「{ch_title}」{len(sections)} 节")
             yield PipelineEvent("phase", {"phase": "writing"})
