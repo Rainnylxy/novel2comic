@@ -253,7 +253,16 @@ class ContinuationPipeline:
         self._init_agents()
         print("完成")
 
-        # 7. Session 恢复：检测已生成章节并从断点继续
+        # 7. 尾部叙事分析（新增）
+        from ..distillers.narrative_distiller import NarrativeDistiller
+        distiller = NarrativeDistiller(self._llm)
+        print(f"[Narrative] 正在分析尾部 15 章叙事特征...")
+        tail_cards = distiller.analyze_tail(self._novel_text, last_n=15)
+        for card in tail_cards:
+            self._story_memory.narrative_cards[card.chapter_number] = card
+        print(f"[Narrative] 完成: {len(tail_cards)} 张叙事卡")
+
+        # 8. Session 恢复：检测已生成章节并从断点继续
         self._restore_session(project_dir)
 
     def _verify_characters_in_text(self, text: str):
@@ -675,7 +684,7 @@ class ContinuationPipeline:
             sections = chapter.get("sections", [])
             if not sections:
                 sections = [{"name": "main", "goal": chapter.get("synopsis", ""),
-                             "characters": [], "key_beats": [], "target_fragments": 20}]
+                             "characters": [], "key_beats": [], "target_paragraphs": 20}]
 
             print(f"[第{chapter_count}章] Phase 2/3 — 写作「{ch_title}」{len(sections)} 节")
             yield PipelineEvent("phase", {"phase": "writing"})
