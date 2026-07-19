@@ -54,6 +54,7 @@ class ContinuationPipeline:
         self._phase: str = "idle"
         self._chapter: int = 0
         self._fragment_count: int = 0
+        self._chapter_original_count: int = 0  # load_novel 时设置，用于判断是否是新生成的章节
 
         # 角色状态验证标记：已验证过的角色不再重复验证
         self._status_verified: set = set()
@@ -264,6 +265,9 @@ class ContinuationPipeline:
 
         # 8. Session 恢复：检测已生成章节并从断点继续
         self._restore_session(project_dir)
+
+        # 记录原文章节数（含 Session 恢复的已生成章节），供 Phase 2.5 判断
+        self._chapter_original_count = self._chapter
 
     def _verify_characters_in_text(self, text: str):
         """按需验证：提取文本中提到的角色，对其做现场状态验证。
@@ -725,6 +729,43 @@ class ContinuationPipeline:
             self._roadmap_chapter_index += 1
             if project_dir:
                 self._save_roadmap_index(project_dir, self._roadmap_chapter_index)
+
+            # ── Phase 2.5: 批量沉淀（每 10 章） ──
+            BATCH_INTERVAL = 10
+            if ch_num % BATCH_INTERVAL == 0 and ch_num > self._chapter_original_count:
+                self._phase = "narrating"
+                print(f"[Phase 2.5] 批量叙事分析 (第{ch_num - BATCH_INTERVAL + 1}-{ch_num}章)...")
+                yield PipelineEvent("phase", {"phase": "narrating"})
+
+                # 收集最近 10 章的 prose 文本
+                batch_prose = []
+                for batch_ch in range(ch_num - BATCH_INTERVAL + 1, ch_num + 1):
+                    ch_data = self._load_chapter_full_from_disk(project_dir, batch_ch)
+                    if ch_data:
+                        fragments = ch_data.get("fragments", [])
+                        prose = "\n".join(
+                            (f"{f.get('character', '')}: " if f.get('character') else "")
+                            + f.get('text', '')
+                            for f in fragments
+                        )
+                        batch_prose.append((batch_ch, prose))
+
+                if batch_prose:
+                    from ..distillers.narrative_distiller import NarrativeDistiller
+                    distiller = NarrativeDistiller(self._llm)
+                    try:
+                        cards, summary = distiller.analyze_batch(batch_prose)
+                        for card in cards:
+                            self._story_memory.narrative_cards[card.chapter_number] = card
+                        self._story_memory.batch_summaries.append(summary)
+                        print(f"  [Narrative] 批量分析完成: {len(cards)} 张叙事卡 + 1 个批级摘要")
+
+                        # 伏笔断线检测（随批次触发）
+                        stale = self._story_memory.foreshadowing_ledger.get_stale(threshold=30)
+                        if stale:
+                            print(f"  [Foreshadowing] ⚠ {len(stale)} 条伏笔超过30章未推进")
+                    except Exception as e:
+                        print(f"  [Narrative] 批量分析失败（非致命）: {e}")
 
             # ================================================
             # Phase 3: Review
