@@ -60,13 +60,13 @@ def make_fallback_chapter(chapter_number: int) -> dict:
         "character_beats": {},
         "sections": [
             {"name": "opening", "goal": "衔接上一章结尾", "characters": [],
-             "key_beats": ["开场"], "target_fragments": 5},
+             "key_beats": ["开场"], "target_paragraphs": 5},
             {"name": "rising", "goal": "推进冲突", "characters": [],
-             "key_beats": ["推进"], "target_fragments": 6},
+             "key_beats": ["推进"], "target_paragraphs": 6},
             {"name": "climax", "goal": "关键转折", "characters": [],
-             "key_beats": ["高潮"], "target_fragments": 5},
+             "key_beats": ["高潮"], "target_paragraphs": 5},
             {"name": "hook", "goal": "章尾悬念", "characters": [],
-             "key_beats": ["悬念"], "target_fragments": 3},
+             "key_beats": ["悬念"], "target_paragraphs": 3},
         ],
         "plot_threads_introduced": [],
     }
@@ -506,6 +506,9 @@ class PlotArchitect(BaseAgent):
                     "roadmap_title": "弧线名",
                     "roadmap_synopsis": "整体走向",
                     "total_chapters": 15,
+                    "stage_definition": "开篇期/发展期/转折期/高潮期/收尾期",
+                    "emotion_curve": "压抑 → 加压 → 爽感释放 → 冷却",
+                    "forbidden_releases": ["不能提前揭露的真相"],
                     "milestones": [
                       {"index": 1, "milestone_title": "...", "synopsis": "...",
                        "key_conflicts": [...], "characters_involved": [...],

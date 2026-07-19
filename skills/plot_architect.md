@@ -54,6 +54,12 @@ description: 自主规划架构师——自主管理篇章路线图（roadmap）
 - 里程碑 10-12：高潮期 — 与最终 Boss/冲突正面对决
 - 里程碑 13-15：收尾期 — 解决主线，埋下新悬念（为下次续写留钩子）
 
+### 阶段定义
+
+- 路线图必须显式声明 `stage_definition`，枚举值: "开篇期/发展期/转折期/高潮期/收尾期"
+- `emotion_curve`: 本章阶段内的整体情绪递进（一句中文描述，如 "压抑 → 加压 → 爽感释放 → 冷却"），由各 milestone 的情绪目标聚合而成
+- `forbidden_releases`: 本阶段绝对不能提前暴露的信息、角色真实身份、终极底牌
+
 ### 主题一致性
 
 - 路线图要有明确的 `major_themes`（1-3 个核心主题）
@@ -89,6 +95,9 @@ description: 自主规划架构师——自主管理篇章路线图（roadmap）
   ],
   "climax_milestone": 12,
   "final_boss_hints": "最终Boss/冲突的暗示（不要太具体）",
+  "stage_definition": "开篇期",
+  "emotion_curve": "压抑 → 加压 → 爽感释放 → 冷却",
+  "forbidden_releases": ["不能提前揭露的真相/角色/底牌"],
   "major_themes": ["核心主题1", "核心主题2"],
   "plot_threads_introduced": ["新引入、将在后续回收的悬念"]
 }
@@ -158,7 +167,7 @@ Chapter Plan:
 
 每个章节拆分为 4 个小节，每节有明确叙事功能:
 
-| Section | 功能                  | target_fragments |
+| Section | 功能                  | target_paragraphs |
 | ------- | --------------------- | ---------------- |
 | opening | 场景锚定 + 衔接上一章 | 5-8              |
 | rising  | 推进冲突 + 角色互动   | 6-10             |
@@ -215,28 +224,28 @@ Chapter Plan:
       "goal": "本节目标",
       "characters": ["角色"],
       "key_beats": ["情节点1", "情节点2", "情节点3"],
-      "target_fragments": 5
+      "target_paragraphs": 5
     },
     {
       "name": "rising",
       "goal": "本节目标",
       "characters": ["角色"],
       "key_beats": ["情节点1", "情节点2", "情节点3"],
-      "target_fragments": 8
+      "target_paragraphs": 8
     },
     {
       "name": "climax",
       "goal": "本节目标",
       "characters": ["角色"],
       "key_beats": ["情节点1", "情节点2"],
-      "target_fragments": 6
+      "target_paragraphs": 6
     },
     {
       "name": "hook",
       "goal": "章尾悬念",
       "characters": ["角色"],
       "key_beats": ["悬念点"],
-      "target_fragments": 4
+      "target_paragraphs": 4
     }
   ],
   "plot_threads_introduced": ["本章引入的悬念"]
