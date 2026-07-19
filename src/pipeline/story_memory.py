@@ -16,6 +16,8 @@
 from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING
 
+from .narrative_card import ChapterNarrativeCard, BatchNarrativeSummary
+
 if TYPE_CHECKING:
     from ..core.llm import UnifiedLLM
 
@@ -85,6 +87,13 @@ class StoryMemory:
     total_fragments_written: int = 0
     last_compaction_ch: int = 0
 
+    # ── 叙事分析卡 ──
+    # {chapter_number: ChapterNarrativeCard}  单章叙事特征
+    narrative_cards: dict = field(default_factory=dict)
+
+    # 批级聚合，按时间顺序
+    batch_summaries: list = field(default_factory=list)
+
     # ================================================================
     # 序列化 / 反序列化
     # ================================================================
@@ -101,6 +110,8 @@ class StoryMemory:
             "total_chapters_written": self.total_chapters_written,
             "total_fragments_written": self.total_fragments_written,
             "last_compaction_ch": self.last_compaction_ch,
+            "narrative_cards": {str(k): v.to_dict() for k, v in self.narrative_cards.items()},
+            "batch_summaries": [bs.to_dict() for bs in self.batch_summaries],
         }
 
     @classmethod
@@ -116,6 +127,14 @@ class StoryMemory:
             total_chapters_written=d.get("total_chapters_written", 0),
             total_fragments_written=d.get("total_fragments_written", 0),
             last_compaction_ch=d.get("last_compaction_ch", 0),
+            narrative_cards={
+                int(k): ChapterNarrativeCard.from_dict(v)
+                for k, v in d.get("narrative_cards", {}).items()
+            },
+            batch_summaries=[
+                BatchNarrativeSummary.from_dict(bs)
+                for bs in d.get("batch_summaries", [])
+            ],
         )
 
     # ================================================================
@@ -364,3 +383,37 @@ class StoryMemory:
     def snapshot_character_statuses(self) -> dict[str, str]:
         """给 Writer/ReviewEditor 用的角色状态快照。"""
         return self.get_dead_or_missing()
+
+    # ================================================================
+    # 叙事分析卡
+    # ================================================================
+
+    def get_recent_narrative_cards(self, n: int = 5) -> list:
+        """获取最近 n 章的叙事分析卡，按章节号降序。"""
+        sorted_cards = sorted(
+            self.narrative_cards.values(),
+            key=lambda c: c.chapter_number,
+            reverse=True,
+        )
+        return sorted_cards[:n]
+
+    def get_latest_batch_summary(self) -> Optional["BatchNarrativeSummary"]:
+        """获取最新的批级聚合卡。"""
+        return self.batch_summaries[-1] if self.batch_summaries else None
+
+    def get_narrative_context(self, n: int = 5) -> str:
+        """生成最近 n 章叙事上下文文本，供 Agent prompt 注入。"""
+        cards = self.get_recent_narrative_cards(n)
+        if not cards:
+            return "（暂无叙事分析数据）"
+
+        lines = ["## 最近章节叙事特征"]
+        for card in sorted(cards, key=lambda c: c.chapter_number):
+            lines.append(
+                f"第{card.chapter_number}章: "
+                f"情绪={card.emotion_arc or '?'}, "
+                f"节奏={card.rhythm_type or '?'}, "
+                f"钩子={card.closing_hook_type or '?'}"
+                + (f", 爽点={card.highlight_type}" if card.highlight_type and card.highlight_type != "无" else "")
+            )
+        return "\n".join(lines)
