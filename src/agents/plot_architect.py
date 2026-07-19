@@ -60,13 +60,13 @@ def make_fallback_chapter(chapter_number: int) -> dict:
         "character_beats": {},
         "sections": [
             {"name": "opening", "goal": "衔接上一章结尾", "characters": [],
-             "key_beats": ["开场"], "target_paragraphs": 5},
+             "key_beats": ["开场"], "target_fragments": 5},
             {"name": "rising", "goal": "推进冲突", "characters": [],
-             "key_beats": ["推进"], "target_paragraphs": 6},
+             "key_beats": ["推进"], "target_fragments": 6},
             {"name": "climax", "goal": "关键转折", "characters": [],
-             "key_beats": ["高潮"], "target_paragraphs": 5},
+             "key_beats": ["高潮"], "target_fragments": 5},
             {"name": "hook", "goal": "章尾悬念", "characters": [],
-             "key_beats": ["悬念"], "target_paragraphs": 3},
+             "key_beats": ["悬念"], "target_fragments": 3},
         ],
         "plot_threads_introduced": [],
     }

@@ -167,7 +167,7 @@ Chapter Plan:
 
 每个章节拆分为 4 个小节，每节有明确叙事功能:
 
-| Section | 功能                  | target_paragraphs |
+| Section | 功能                  | target_fragments |
 | ------- | --------------------- | ---------------- |
 | opening | 场景锚定 + 衔接上一章 | 5-8              |
 | rising  | 推进冲突 + 角色互动   | 6-10             |
@@ -224,28 +224,28 @@ Chapter Plan:
       "goal": "本节目标",
       "characters": ["角色"],
       "key_beats": ["情节点1", "情节点2", "情节点3"],
-      "target_paragraphs": 5
+      "target_fragments": 5
     },
     {
       "name": "rising",
       "goal": "本节目标",
       "characters": ["角色"],
       "key_beats": ["情节点1", "情节点2", "情节点3"],
-      "target_paragraphs": 8
+      "target_fragments": 8
     },
     {
       "name": "climax",
       "goal": "本节目标",
       "characters": ["角色"],
       "key_beats": ["情节点1", "情节点2"],
-      "target_paragraphs": 6
+      "target_fragments": 6
     },
     {
       "name": "hook",
       "goal": "章尾悬念",
       "characters": ["角色"],
       "key_beats": ["悬念点"],
-      "target_paragraphs": 4
+      "target_fragments": 4
     }
   ],
   "plot_threads_introduced": ["本章引入的悬念"]
