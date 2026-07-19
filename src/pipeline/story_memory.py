@@ -16,6 +16,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING
 
+from .foreshadowing_ledger import ForeshadowingLedger
 from .narrative_card import ChapterNarrativeCard, BatchNarrativeSummary
 
 if TYPE_CHECKING:
@@ -94,6 +95,9 @@ class StoryMemory:
     # 批级聚合，按时间顺序
     batch_summaries: list = field(default_factory=list)
 
+    # ── 伏笔账本 ──
+    foreshadowing_ledger: ForeshadowingLedger = field(default_factory=ForeshadowingLedger)
+
     # ================================================================
     # 序列化 / 反序列化
     # ================================================================
@@ -112,6 +116,7 @@ class StoryMemory:
             "last_compaction_ch": self.last_compaction_ch,
             "narrative_cards": {str(k): v.to_dict() for k, v in self.narrative_cards.items()},
             "batch_summaries": [bs.to_dict() for bs in self.batch_summaries],
+            "foreshadowing_ledger": self.foreshadowing_ledger.to_dict(),
         }
 
     @classmethod
@@ -135,6 +140,9 @@ class StoryMemory:
                 BatchNarrativeSummary.from_dict(bs)
                 for bs in d.get("batch_summaries", [])
             ],
+            foreshadowing_ledger=ForeshadowingLedger.from_dict(
+                d.get("foreshadowing_ledger", {})
+            ),
         )
 
     # ================================================================
@@ -198,7 +206,23 @@ class StoryMemory:
                 return
 
     def get_pending_threads(self) -> list[dict]:
-        """获取所有未回收的伏笔。"""
+        """获取所有未回收的伏笔。
+
+        优先从 foreshadowing_ledger 读取（新数据源），
+        兜底从旧的 pending_threads 列表读取（兼容旧序列化数据）。
+        """
+        entries = self.foreshadowing_ledger.get_pending()
+        if entries:
+            return [
+                {
+                    "thread": e.description,
+                    "introduced_ch": e.buried_chapter,
+                    "status": e.status,
+                    "resolved_ch": e.actual_resolution_chapter or None,
+                    "description": e.description,
+                }
+                for e in entries
+            ]
         return [t for t in self.pending_threads if t.get("status") == "pending"]
 
     # ================================================================

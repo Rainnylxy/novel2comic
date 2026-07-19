@@ -661,13 +661,15 @@ class ContinuationPipeline:
             self._story_memory.add_chapter_plan(plan_summary)
             self._chapter_plan_history = self._story_memory.chapter_plans  # 兼容旧引用
 
-            # 收集伏笔（StoryMemory 去重管理）
+            # 收集伏笔（ForeshadowingLedger 管理生命周期）
             if roadmap_store.get("dirty"):
                 for t in self._roadmap.get("plot_threads_introduced", []):
-                    self._story_memory.add_thread(t, ch_num)
+                    if isinstance(t, str):
+                        self._story_memory.foreshadowing_ledger.add(t, ch_num)
             for t in chapter.get("plot_threads_introduced", []):
-                self._story_memory.add_thread(t, ch_num)
-            self._introduced_threads = self._story_memory.get_pending_threads()
+                if isinstance(t, str):
+                    self._story_memory.foreshadowing_ledger.add(t, ch_num)
+            self._introduced_threads = self._story_memory.foreshadowing_ledger.get_pending()
 
             # 持久化
             if project_dir:
@@ -696,7 +698,7 @@ class ContinuationPipeline:
             self.writer.set_context(
                 chapter=chapter,
                 previous_chapter_ending=self._previous_chapter_ending,
-                plot_threads=self._introduced_threads,
+                plot_threads=self._story_memory.foreshadowing_ledger.get_pending(),
             )
 
             draft_fragments = []
@@ -1213,11 +1215,12 @@ class ContinuationPipeline:
             restored_plans += 1
 
             for t in ch_data.get("plot_threads_introduced", []):
-                self._story_memory.add_thread(t, ch_num)
+                if isinstance(t, str):
+                    self._story_memory.foreshadowing_ledger.add(t, ch_num)
                 restored_threads += 1
 
         self._chapter_plan_history = self._story_memory.chapter_plans
-        self._introduced_threads = self._story_memory.get_pending_threads()
+        self._introduced_threads = self._story_memory.foreshadowing_ledger.get_pending()
         print(f"[Resume] StoryMemory 已恢复: {restored_plans} 个章节规划, "
               f"{restored_threads} 条伏笔")
 
