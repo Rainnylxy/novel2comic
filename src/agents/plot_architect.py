@@ -647,10 +647,134 @@ class PlotArchitect(BaseAgent):
             else:
                 return f"{name}: 无法确定状态（LLM 返回空），请基于原文上下文自行判断"
 
+        @tool
+        def query_narrative_pattern(start_ch: int = 0, end_ch: int = 0) -> str:
+            """查询原文的叙事模式（节奏曲线、钩子偏好、爽点密度）。
+
+            用于帮助理解"原著的叙事习惯"，让续写规划更贴近原作节奏。
+
+            Args:
+                start_ch: 起始章节号（0 表示取最新的叙事分析数据）
+                end_ch: 结束章节号（0 表示取所有可用数据）
+
+            Returns:
+                格式化的叙事模式摘要文本
+            """
+            sm = self_ref._state.story_memory
+            if not sm:
+                return "故事记忆不可用"
+
+            if start_ch > 0 and end_ch > 0:
+                cards_in_range = [
+                    c for c in sm.narrative_cards.values()
+                    if start_ch <= c.chapter_number <= end_ch
+                ]
+                cards = sorted(cards_in_range, key=lambda c: c.chapter_number)
+            else:
+                cards = sorted(
+                    sm.narrative_cards.values(),
+                    key=lambda c: c.chapter_number,
+                )
+
+            if not cards:
+                return "暂无叙事分析数据。请确认已对原文进行了叙事分析。"
+
+            lines = [f"叙事模式分析（共 {len(cards)} 章数据）"]
+            lines.append(f"章节范围: 第{cards[0].chapter_number}-{cards[-1].chapter_number}章")
+
+            # 节奏分布
+            rhythm_counts = {}
+            for c in cards:
+                r = c.rhythm_type or "未标注"
+                rhythm_counts[r] = rhythm_counts.get(r, 0) + 1
+            total = len(cards)
+            rhythm_parts = [f"{k} {v}/{total} ({v*100//total}%)" for k, v in sorted(rhythm_counts.items(), key=lambda x: -x[1])]
+            lines.append(f"节奏分布: {', '.join(rhythm_parts)}")
+
+            # 钩子偏好
+            hook_counts = {}
+            for c in cards:
+                h = c.closing_hook_type or "未标注"
+                hook_counts[h] = hook_counts.get(h, 0) + 1
+            hook_parts = [f"{k} {v}次" for k, v in sorted(hook_counts.items(), key=lambda x: -x[1])]
+            lines.append(f"章尾钩子偏好: {', '.join(hook_parts)}")
+
+            # 爽点密度
+            highlights = [c for c in cards if c.highlight_type and c.highlight_type != "无"]
+            if highlights:
+                density = len(cards) / len(highlights)
+                types = set(h.highlight_type for h in highlights)
+                lines.append(f"爽点密度: 每 {density:.1f} 章一个 (类型: {', '.join(types)})")
+            else:
+                lines.append("爽点密度: 无明显标注爽点")
+
+            # 最近 5 章情绪曲线
+            recent = cards[-5:]
+            lines.append("最近 5 章情绪走向:")
+            for c in recent:
+                lines.append(f"  第{c.chapter_number}章: {c.emotion_arc or '?'} [{c.rhythm_type or '?'}]")
+
+            # 批级聚合
+            batch = sm.get_latest_batch_summary()
+            if batch:
+                lines.append(f"\n最近的批级聚合 (第{batch.chapters_range[0]}-{batch.chapters_range[1]}章):")
+                if batch.emotion_curve:
+                    lines.append(f"  情绪曲线: {batch.emotion_curve}")
+                if batch.rhythm_pattern:
+                    lines.append(f"  节奏模式: {batch.rhythm_pattern}")
+
+            return "\n".join(lines)
+
+        @tool
+        def query_foreshadowing_status() -> str:
+            """查询当前伏笔台账的快照摘要。
+
+            返回: 全部待回收伏笔 / 已过期伏笔 / 即将到期的伏笔的格式化摘要。
+            用于帮助决定本章需要推进或回收哪些伏笔。
+
+            Returns:
+                格式化伏笔摘要文本
+            """
+            sm = self_ref._state.story_memory
+            if not sm:
+                return "故事记忆不可用"
+
+            # 检查是否有 ForeshadowingLedger
+            ledger = getattr(sm, 'foreshadowing_ledger', None)
+            if ledger is None:
+                # 回退到旧 pending_threads
+                pending = sm.get_pending_threads()
+                if not pending:
+                    return "暂无待回收伏笔。"
+                lines = ["## 伏笔台账（旧格式）", f"共 {len(pending)} 条待回收:"]
+                for t in pending:
+                    lines.append(f"  - [{t.get('status', '?')}] {t.get('thread', '?')} (埋于第{t.get('introduced_ch', '?')}章)")
+                return "\n".join(lines)
+
+            pending = ledger.get_pending()
+            stale = ledger.get_stale(threshold=30)
+
+            lines = ["## 伏笔台账"]
+            lines.append(f"待回收: {len(pending)} 条")
+
+            if stale:
+                lines.append(f"⚠ 超30章未推进 (可能已遗忘): {len(stale)} 条")
+                for e in stale:
+                    lines.append(f"  - {e.id}: {e.description} (埋于第{e.buried_chapter}章)")
+
+            if pending:
+                lines.append("\n近期需处理:")
+                for e in pending[:10]:
+                    lines.append(f"  - {e.id}: {e.description} (计划第{e.planned_resolution_chapter}章回收)")
+
+            return "\n".join(lines)
+
         return [
             lookup_roadmap,
             update_roadmap,
             verify_character,
+            query_narrative_pattern,
+            query_foreshadowing_status,
             gather_active_conflicts,
             lookup_character,
         ]
