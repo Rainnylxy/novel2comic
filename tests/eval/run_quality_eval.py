@@ -292,7 +292,7 @@ async def run_case(case: dict) -> dict:
             character_profiles=character_profiles,
             dead_chars=dead_chars,
             missing_chars=missing_chars,
-            target_fragments=ch_data.get("fragment_count", 0),
+            target_paragraphs=ch_data.get("fragment_count", 0),
             traces=ch_traces,
             preloaded_chars=preloaded,
         )

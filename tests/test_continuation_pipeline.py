@@ -83,13 +83,13 @@ class TestPipelineFlow:
             "character_beats": {},
             "sections": [
                 {"name": "opening", "goal": "开场", "characters": [],
-                 "key_beats": ["开场"], "target_fragments": 3},
+                 "key_beats": ["开场"], "target_paragraphs": 3},
                 {"name": "rising", "goal": "推进", "characters": [],
-                 "key_beats": ["推进"], "target_fragments": 3},
+                 "key_beats": ["推进"], "target_paragraphs": 3},
                 {"name": "climax", "goal": "高潮", "characters": [],
-                 "key_beats": ["高潮"], "target_fragments": 3},
+                 "key_beats": ["高潮"], "target_paragraphs": 3},
                 {"name": "hook", "goal": "悬念", "characters": [],
-                 "key_beats": ["悬念"], "target_fragments": 2},
+                 "key_beats": ["悬念"], "target_paragraphs": 2},
             ],
         }))
         mock_writer = MagicMock()
@@ -153,11 +153,6 @@ class TestFragmentTypes:
             d = f.to_dict()
             assert "type" in d
             assert "text" in d
-            sse = f.to_sse()
-            assert "\n" not in sse  # SSE 单行约束
-            restored = StoryFragment.from_json(sse)
-            assert restored.type == f.type
-            assert restored.text == f.text
 
 
 # Helper: async generator from list

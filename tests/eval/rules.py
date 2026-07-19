@@ -254,7 +254,7 @@ def run_rule_checks(
     character_profiles: Optional[dict] = None,
     dead_chars: Optional[set] = None,
     missing_chars: Optional[set] = None,
-    target_fragments: int = 0,
+    target_paragraphs: int = 0,
     traces: Optional[list] = None,
     preloaded_chars: Optional[set] = None,
 ) -> dict:
@@ -265,7 +265,7 @@ def run_rule_checks(
         character_profiles: {name: CharacterProfile} 蒸馏档案
         dead_chars: 已知已死亡的角色名集合
         missing_chars: 已知下落不明的角色名集合
-        target_fragments: 目标片段数
+        target_paragraphs: 目标片段数
         traces: 已解析的 Agent trace 列表（用于工具效率检查）
         preloaded_chars: 已预加载的角色名集合（来自 chapter_plan）
 
@@ -334,7 +334,7 @@ def run_rule_checks(
         "syntax": syntax,
         "distribution": distribution,
         "fragment_count": len(fragments),
-        "target_deviation": calc_target_deviation(len(fragments), target_fragments),
+        "target_deviation": calc_target_deviation(len(fragments), target_paragraphs),
     }
     if tool_efficiency:
         stats["tool_efficiency"] = tool_efficiency

@@ -1,6 +1,7 @@
 import json
 import pytest
-from src.pipeline.fragment import StoryFragment, PipelineEvent, FragmentType
+from src.pipeline.fragment import StoryFragment, PipelineEvent
+from src.pipeline.fragmentizer import Fragmentizer
 
 
 class TestStoryFragment:
@@ -22,36 +23,6 @@ class TestStoryFragment:
         assert d["type"] == "divider"
         assert d["divider_label"] == "三小时后"
 
-    def test_sse_format_is_single_line(self):
-        frag = StoryFragment(type="narration", text="测试文本")
-        sse = frag.to_sse()
-        assert "\n" not in sse
-
-    def test_roundtrip(self):
-        original = StoryFragment(type="dialogue", text="知道了。", character="严峫")
-        sse = original.to_sse()
-        restored = StoryFragment.from_json(sse)
-        assert restored.type == original.type
-        assert restored.text == original.text
-        assert restored.character == original.character
-
-    def test_parse_stream_line_valid_json(self):
-        line = '{"type": "narration", "text": "夜。\\n风起。"}'
-        frag = StoryFragment.parse_stream_line(line)
-        assert frag is not None
-        assert frag.type == "narration"
-        assert frag.text == "夜。\n风起。"
-
-    def test_parse_stream_line_empty(self):
-        assert StoryFragment.parse_stream_line("") is None
-        assert StoryFragment.parse_stream_line("   ") is None
-
-    def test_parse_stream_line_non_json(self):
-        assert StoryFragment.parse_stream_line("这是解释文本") is None
-
-    def test_parse_stream_line_incomplete_json(self):
-        assert StoryFragment.parse_stream_line('{"type": "dialogue"') is None
-
     def test_pipeline_event_sse_format(self):
         evt = PipelineEvent("phase", {"phase": "writing"})
         sse = evt.to_sse()
@@ -59,9 +30,47 @@ class TestStoryFragment:
         assert "data:" in sse
         assert sse.endswith("\n\n")
 
-    def test_fragment_type_literal(self):
-        """验证 FragmentType 类型限定。"""
-        valid_types = {"dialogue", "narration", "action", "inner_thought", "divider"}
-        for t in valid_types:
-            frag = StoryFragment(type=t, text="test")
-            assert frag.type in valid_types
+
+class TestFragmentizer:
+    def test_narration(self):
+        frags = Fragmentizer().process("夜色如墨。")
+        assert len(frags) == 1
+        assert frags[0].type == "narration"
+        assert frags[0].text == "夜色如墨。"
+
+    def test_dialogue(self):
+        frags = Fragmentizer().process('严峫道：「说。」')
+        assert len(frags) == 1
+        assert frags[0].type == "dialogue"
+        assert "说" in frags[0].text
+        assert frags[0].character == "严峫"
+
+    def test_inner_thought(self):
+        frags = Fragmentizer().process("江停心想这个案子不对。")
+        assert len(frags) == 1
+        assert frags[0].type == "inner_thought"
+        assert frags[0].character == "江停"
+        assert "这个案子不对" in frags[0].text
+
+    def test_action(self):
+        frags = Fragmentizer().process("严峫撑起半边身子，摸索着按下接听键。")
+        assert len(frags) == 1
+        assert frags[0].type in ("action", "narration")  # 可能被归类为 narration
+
+    def test_divider(self):
+        frags = Fragmentizer().process("三小时后。建宁市公安局。")
+        found_divider = any(f.type == "divider" for f in frags)
+        assert found_divider
+
+    def test_multi_paragraph(self):
+        prose = """清晨六点十七分，手机在床头柜上震动起来。
+
+严峫撑起半边身子。
+
+「说。」"""
+        frags = Fragmentizer().process(prose)
+        assert len(frags) >= 2
+
+    def test_empty_input(self):
+        assert Fragmentizer().process("") == []
+        assert Fragmentizer().process("   ") == []

@@ -4,9 +4,11 @@
 from .pipeline import ContinuationPipeline
 from .fragment import StoryFragment, PipelineEvent
 from .story_memory import StoryMemory
+from .fragmentizer import Fragmentizer
 
 __all__ = [
     "ContinuationPipeline",
     "StoryFragment", "PipelineEvent",
     "StoryMemory",
+    "Fragmentizer",
 ]
