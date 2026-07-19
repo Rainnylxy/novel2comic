@@ -256,6 +256,52 @@ class ChapterWriter(BaseAgent):
                              f"关键行动: {beat.get('key_action', '')} | "
                              f"情感时刻: {beat.get('emotional_beat', '')}")
 
+        # 叙事约束（新增）
+        emotion = ch.get("emotion_arc", "")
+        if emotion:
+            parts.append(f"本章情绪目标: {emotion}")
+
+        rhythm = ch.get("rhythm_position", "")
+        if rhythm:
+            rhythm_hints = {
+                "高压": "对话紧、动作密、爽点集中释放，少用大段旁白",
+                "推进": "主线叙事节奏，对话与动作交替推进",
+                "关系": "侧重人物互动和情感流动，对话可以更细腻",
+                "低压": "允许更多旁白和日常描写，但每节仍需有往下看的理由",
+            }
+            hint = rhythm_hints.get(rhythm, "")
+            parts.append(f"本章节奏定位: {rhythm}" + (f"（{hint}）" if hint else ""))
+
+        hook_type = ch.get("closing_hook_type", "")
+        if hook_type:
+            parts.append(f"章尾钩子类型: {hook_type} — 确保章尾给读者这个类型的下读理由")
+
+        forbidden = ch.get("forbidden_releases", [])
+        if forbidden:
+            parts.append(f"⚠ 本章禁止出现: {', '.join(forbidden)}（封禁列表，不得在正文中提及）")
+
+        # 伏笔上下文
+        sm = self._state.story_memory
+        if sm:
+            foreshadowing = sm.foreshadowing_ledger.get_for_chapter(ch.get("chapter_number", 0))
+            to_resolve = ch.get("foreshadowing_resolved", [])
+            to_advance = ch.get("foreshadowing_advanced", [])
+            if to_resolve or to_advance:
+                parts.append("\n## 本章伏笔任务")
+                if to_resolve:
+                    parts.append(f"必须回收: {', '.join(to_resolve)}")
+                if to_advance:
+                    parts.append(f"必须推进: {', '.join(to_advance)}")
+            if foreshadowing:
+                parts.append(f"待处理的伏笔: {', '.join(e.id for e in foreshadowing)}")
+
+        # 叙事参考
+        if sm:
+            narrative_ctx = sm.get_narrative_context(n=5)
+            if narrative_ctx and "暂无" not in narrative_ctx:
+                parts.append("\n## 最近章节叙事特征参考")
+                parts.append(narrative_ctx)
+
         # 当前小节
         parts.append(f"\n## 本节任务: {section.get('name', '')} "
                       f"({section_index + 1}/{total})")
@@ -280,8 +326,8 @@ class ChapterWriter(BaseAgent):
                 parts.append(f"  - {beat}")
 
         # 目标片段数
-        target = section.get("target_fragments", 5)
-        parts.append(f"\n目标: 写 {target} 个 StoryFragment JSON 片段后自然终止。")
+        target = section.get("target_paragraphs", 5)
+        parts.append(f"\n篇幅: 写 {target} 个自然段落后自然终止。")
 
         # 衔接文本
         if self._previous_chapter_ending:
@@ -320,94 +366,23 @@ class ChapterWriter(BaseAgent):
         )
 
     # ================================================================
-    # Post-turn: 从 LLM 自然终止输出中提取 StoryFragment
+    # Post-turn: prose → StoryFragment（Fragmentizer 规则层）
     # ================================================================
 
-    # LLM 自定义 schema → StoryFragment 字段映射
-    _TYPE_MAP = {
-        "narration": "narration", "叙事": "narration", "旁白": "narration",
-        "dialogue": "dialogue", "对话": "dialogue",
-        "action": "action", "动作": "action", "推进": "action", "过渡": "action",
-        "inner_thought": "inner_thought", "内心独白": "inner_thought",
-        "divider": "divider", "分隔": "divider",
-    }
-
     def _on_post_turn(self, user_msg: str, assistant_msg):
-        """从 AgentFlow 自然终止输出中解析 StoryFragment。"""
-        from ..pipeline.fragment import StoryFragment
+        """Writer 输出自然段落，Fragmentizer 转为前端 fragment。"""
+        from agentflow.runtime.builder import AgentResult
+        from ..pipeline.fragmentizer import Fragmentizer
 
         if not assistant_msg:
             return
 
-        from agentflow.runtime.builder import AgentResult
-        if isinstance(assistant_msg, AgentResult):
-            text = assistant_msg.output
-        elif isinstance(assistant_msg, str):
-            text = assistant_msg
-        else:
-            text = str(assistant_msg)
-
+        text = assistant_msg.output if isinstance(assistant_msg, AgentResult) else str(assistant_msg)
         if not text or not text.strip():
             return
 
-        # 1. 从 ```json 代码块中提取多行 JSON
-        import re
-        json_blocks = re.findall(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-        if not json_blocks:
-            # 尝试提取裸 JSON 对象
-            json_blocks = re.findall(r'\{[^{}]*"type"\s*:\s*"[^"]+"[^{}]*\}', text, re.DOTALL)
-
-        parsed = 0
-        for block in json_blocks:
-            block = block.strip()
-            if not block.startswith("{"):
-                continue
+        for frag in Fragmentizer().process(text):
             try:
-                obj = json.loads(block)
-            except json.JSONDecodeError:
-                continue
-
-            # 映射到 StoryFragment
-            raw_type = obj.get("type", "narration")
-            frag_type = self._TYPE_MAP.get(raw_type, "narration")
-            frag_text = obj.get("text") or obj.get("content") or ""
-            character = obj.get("character") or obj.get("speaker") or None
-            divider_label = obj.get("divider_label") or None
-
-            if frag_text.strip():
-                fragment = StoryFragment(
-                    type=frag_type, text=frag_text.strip(),
-                    character=character, divider_label=divider_label,
-                )
-                try:
-                    self._fragment_queue.put_nowait(fragment)
-                    parsed += 1
-                except asyncio.QueueFull:
-                    pass
-
-        # 2. 如果没有 JSON，尝试单行 JSON
-        if parsed == 0:
-            for line in text.strip().split("\n"):
-                line = line.strip()
-                if not line or not line.startswith("{"):
-                    continue
-                fragment = StoryFragment.parse_stream_line(line)
-                if fragment:
-                    try:
-                        self._fragment_queue.put_nowait(fragment)
-                        parsed += 1
-                    except asyncio.QueueFull:
-                        pass
-
-        # 3. 兜底：纯文本按段落拆分为 narration
-        if parsed == 0:
-            clean = text.strip()
-            if clean:
-                for para in clean.split("\n\n"):
-                    para = para.strip()
-                    if para:
-                        fragment = StoryFragment(type="narration", text=para)
-                        try:
-                            self._fragment_queue.put_nowait(fragment)
-                        except asyncio.QueueFull:
-                            pass
+                self._fragment_queue.put_nowait(frag)
+            except asyncio.QueueFull:
+                pass
