@@ -118,7 +118,7 @@ description: 自主规划架构师——自主管理篇章路线图（roadmap）
 | `key_conflicts`       | 体现在 `sections[].key_beats` 中                    | 每个冲突至少对应一个情节点                                         |
 | `characters_involved` | 决定 `verify_character` + `lookup_character` 的对象 | 这些角色必须出现在 `character_beats` 或 `sections[].characters` 中 |
 | `thematic_focus`      | 体现在 `character_beats[].arc` 中                   | 角色的情绪变化要呼应本章主题焦点                                   |
-| `expected_tone`       | `tone`                                              | 直接继承，可细化                                                   |
+| `expected_tone`       | `emotion_arc`                                        | 展开为"前状态 → 触发 → 后状态"格式                                 |
 
 ### `milestone_source` 字段
 
@@ -147,7 +147,7 @@ Chapter Plan:
   chapter_number: 135
   title: "暗流"                        ← 基于 "回归与怀疑" 微调
   synopsis: "江停回到阔别已久的总部，发现新上司处处提防，昔日同事欲言又止。"
-  tone: "悬疑压抑"                     ← 直接继承
+  emotion_arc: "压抑（回到陌生总部）→ 匿名短信出现 → 警觉+战意"  ← 从 expected_tone 展开
   milestone_source: 1                  ← 对应 Milestone #1
   character_beats:
     江停: arc="从期待归队到意识到处境微妙"  ← 呼应 "信任危机"
@@ -197,6 +197,23 @@ Chapter Plan:
 - `plot_threads_advanced`: 从原文 KG 中选出并在本章推进的伏笔（1-2 条）
 - `plot_threads_introduced`: 本章新引入的悬念（0-1 条，不要每章都加新线）
 
+### 新增字段约束
+
+- `emotion_arc`: "前状态 → 触发 → 后状态"，读者视角的章级情绪路径，替代原 tone 字段。三要素缺一不可
+- `rhythm_position`: 高压/推进/关系/低压。高压章对话紧、爽点密；低压章允许更多旁白和日常
+- `closing_hook_type`: 事件钩子/信息钩子/情绪钩子/悬念钩子/弱钩子/阶段目标，确保每章有明确的章尾下读理由
+- `forbidden_releases`: 本章绝不能碰的信息/角色/伏笔，从 Roadmap 的 forbidden_releases 中按章筛选
+- `foreshadowing_advanced`: 本章推动前进的已有伏笔 ID 列表
+- `foreshadowing_resolved`: 本章回收的伏笔 ID 列表
+
+### key_beats 格式升级
+
+每项格式: `"具体情节点描述 [功能标签·密度]"`
+
+- 功能标签: 铺垫/推进/高潮/爽点/打脸/反转/人物塑造/设定/关系/悬念
+- 密度: 密(展开写) / 中(正常写) / 疏(带过)
+- 密度为软指导，不强制字数预算
+
 ---
 
 ## 输出格式
@@ -209,7 +226,12 @@ Chapter Plan:
   "chapter_number": 135,
   "title": "章节标题（4-10字）",
   "synopsis": "本章梗概（50字内）",
-  "tone": "本章基调",
+  "emotion_arc": "压抑（回到陌生总部）→ 匿名短信出现 → 警觉+战意",
+  "rhythm_position": "高压",
+  "closing_hook_type": "悬念钩子",
+  "forbidden_releases": [],
+  "foreshadowing_advanced": ["F003"],
+  "foreshadowing_resolved": [],
   "milestone_source": 1,
   "character_beats": {
     "角色名": {
@@ -223,28 +245,28 @@ Chapter Plan:
       "name": "opening",
       "goal": "本节目标",
       "characters": ["角色"],
-      "key_beats": ["情节点1", "情节点2", "情节点3"],
+      "key_beats": ["场景锚定 [铺垫·密200]", "冲突引入 [推进·密250]", "气氛渲染 [铺垫·中150]"],
       "target_fragments": 5
     },
     {
       "name": "rising",
       "goal": "本节目标",
       "characters": ["角色"],
-      "key_beats": ["情节点1", "情节点2", "情节点3"],
+      "key_beats": ["矛盾升级 [推进·密300]", "角色交锋 [人物塑造·密250]", "信息揭露 [推进·中200]"],
       "target_fragments": 8
     },
     {
       "name": "climax",
       "goal": "本节目标",
       "characters": ["角色"],
-      "key_beats": ["情节点1", "情节点2"],
+      "key_beats": ["关键转折 [高潮·密300]", "情绪爆发 [高潮·密250]"],
       "target_fragments": 6
     },
     {
       "name": "hook",
       "goal": "章尾悬念",
       "characters": ["角色"],
-      "key_beats": ["悬念点"],
+      "key_beats": ["悬念引爆 [悬念·密150]"],
       "target_fragments": 4
     }
   ],
