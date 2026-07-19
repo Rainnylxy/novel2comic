@@ -38,10 +38,12 @@ class ReviewEditor(BaseAgent):
         super().__init__(agent_llm, kg, state)
         self._kg = kg
         self._draft_fragments: list = []
+        self._chapter_plan: dict = {}
 
-    def set_context(self, draft_fragments: list):
+    def set_context(self, draft_fragments: list, chapter_plan: dict = None):
         """设置审校上下文。"""
         self._draft_fragments = draft_fragments
+        self._chapter_plan = chapter_plan or {}
         # 从 PipelineState 同步
         self._character_profiles = self._state.character_profiles
         self._style_profile = self._state.style_profile
@@ -104,19 +106,32 @@ class ReviewEditor(BaseAgent):
         # 风格概要
         style_text = self._style_profile.summary() if self._style_profile else ""
 
+        cp = self._chapter_plan
+
         prompt = (
             f"## 待审校草稿\n{draft_text[:6000]}\n\n"
             + (f"## 角色设定（对照检查 OOC）\n{json.dumps(char_specs, ensure_ascii=False, indent=2)}\n\n" if char_specs else "")
             + (f"## 已有事件时间线（对照检查时间线矛盾）\n{timeline_text}\n\n" if timeline_text else "")
             + (f"## 角色状态约束\n{status_text}\n\n" if status_text else "")
             + (f"## 文风约束\n{style_text}\n\n" if style_text else "")
+            + "## 本章规划（契约）\n"
+            + f"emotion_arc: {cp.get('emotion_arc', '未标注')}\n"
+            + f"rhythm_position: {cp.get('rhythm_position', '未标注')}\n"
+            + f"closing_hook_type: {cp.get('closing_hook_type', '未标注')}\n"
+            + f"forbidden_releases: {json.dumps(cp.get('forbidden_releases', []), ensure_ascii=False)}\n"
+            + f"foreshadowing_resolved: {json.dumps(cp.get('foreshadowing_resolved', []), ensure_ascii=False)}\n"
+            + f"foreshadowing_advanced: {json.dumps(cp.get('foreshadowing_advanced', []), ensure_ascii=False)}\n"
+            + f"key_beats: {json.dumps([b for s in cp.get('sections', []) for b in s.get('key_beats', [])], ensure_ascii=False)}\n"
+            + f"character_beats: {json.dumps(cp.get('character_beats', {}), ensure_ascii=False)}\n\n"
             + "## 任务\n"
-            + "你是专业的审校编辑。请逐条检查草稿中的问题，并直接修正有问题的 fragment。\n\n"
-            + "检查维度:\n"
-            + "1. **角色 OOC**: 对话/行为是否符合 Voice 和硬底线？\n"
-            + "2. **死活约束**: status=dead/deceased 的角色是否被写成了存活状态（对话、动作）？→ severity=critical\n"
-            + "3. **时间线**: 事件顺序是否与已有时间线矛盾？\n"
-            + "4. **风格一致性**: 语气、节奏是否偏离原作？\n\n"
+            + "你是专业的审校编辑。请对照本章规划（契约），逐条验收草稿：\n"
+            + "1. emotion_arc: 正文是否实际交付了目标情绪路径（warning）\n"
+            + "2. rhythm_position: 叙事节奏是否与定位一致（warning）\n"
+            + "3. forbidden_releases: 是否出现禁止释放的信息（critical，强制删除/改写）\n"
+            + "4. foreshadowing: 承诺回收/推进的伏笔有无兑现（warning）\n"
+            + "5. key_beats: 关键情节点是否都写到了（warning）\n"
+            + "6. character_beats: 角色情绪变化是否在正文中可感知（warning）\n"
+            + "7. 角色 OOC / 时间线 / 死活约束（已有，critical）\n\n"
             + "修正原则:\n"
             + "- 只修改有问题的 fragment，其他保持原样\n"
             + "- 返回完整的 fragment 列表（包含未修改的）\n"
@@ -125,6 +140,15 @@ class ReviewEditor(BaseAgent):
             + '{\n'
             + '  "revised_fragments": [{"type": "...", "text": "...", "character": "..."}],\n'
             + '  "changes": [{"fragment_index": 0, "original": "...", "revised": "...", "reason": "..."}],\n'
+            + '  "verification": {\n'
+            + '    "emotion_arc": {"passed": true, "evidence": "..."},\n'
+            + '    "rhythm_position": {"passed": true},\n'
+            + '    "forbidden_releases": {"passed": true},\n'
+            + '    "foreshadowing_resolved": {"passed": true, "resolved": []},\n'
+            + '    "foreshadowing_advanced": {"passed": true, "unadvanced": []},\n'
+            + '    "key_beats": {"passed": true, "covered": "5/5"},\n'
+            + '    "character_beats": {"passed": true}\n'
+            + '  },\n'
             + '  "overall_score": 8.5\n'
             + '}'
         )
@@ -132,8 +156,15 @@ class ReviewEditor(BaseAgent):
         try:
             result = self._state.sync_llm.chat_json(
                 system_prompt=(
-                    "你是专业的审校编辑。检查续写草稿的角色一致性、时间线正确性和设定矛盾。"
-                    "发现问题直接修正，不要只标记。只返回 JSON。"
+                    "你是专业的审校编辑。请对照本章规划（契约），逐条验收草稿："
+                    "1. emotion_arc: 正文是否实际交付了目标情绪路径（warning）"
+                    "2. rhythm_position: 叙事节奏是否与定位一致（warning）"
+                    "3. forbidden_releases: 是否出现禁止释放的信息（critical，强制删除/改写）"
+                    "4. foreshadowing: 承诺回收/推进的伏笔有无兑现（warning）"
+                    "5. key_beats: 关键情节点是否都写到了（warning）"
+                    "6. character_beats: 角色情绪变化是否在正文中可感知（warning）"
+                    "7. 角色 OOC / 时间线 / 死活约束（已有，critical）"
+                    "发现问题直接修正。只返回 JSON。"
                 ),
                 user_prompt=prompt,
                 temperature=0.3,

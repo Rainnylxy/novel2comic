@@ -733,7 +733,10 @@ class ContinuationPipeline:
             print(f"[第{chapter_count}章] Phase 3/3 — 审校修订...")
             yield PipelineEvent("phase", {"phase": "reviewing"})
 
-            self.review_editor.set_context(draft_fragments=draft_fragments)
+            self.review_editor.set_context(
+                draft_fragments=draft_fragments,
+                chapter_plan=chapter,
+            )
             result_raw = await self.review_editor.run("审校并修订草稿")
             result = self._parse_review_result(result_raw)
 
